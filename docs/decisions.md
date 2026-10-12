@@ -46,3 +46,49 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 - **Options:** Each module handles its own paths.
 - **Why:** One guard in one place, so a module bug or a bad parameter can't
   write or delete outside the lab folder.
+
+## D6. Steps run in background jobs, one at a time
+
+- **Decision:** Each Run/Cleanup runs via `Start-Job` → `server/StepRunner.ps1`
+  in a separate `powershell.exe`. The server loop checks jobs between
+  requests, so the UI stays responsive. Only one operation runs at a time;
+  "Run all" and "Cleanup" are queues. Each job has a timeout (default 120 s).
+  Module metadata and hunt guidance ("describe") are read in a short-lived
+  in-process runspace when a session is loaded, because they don't touch the
+  system and a job costs about a second to start.
+- **Options:** Runspace pool in-process; `Start-Process` per step; run inline.
+- **Why:** Jobs are built into 5.1, isolate crashes and hangs from the server,
+  and can be stopped. One-at-a-time matches how a facilitator runs a TTX.
+
+## D7. One active session; state saved after every change
+
+- **Decision:** There is one current session. The engine writes
+  `runs/<id>/state.json` (atomically) after every change and appends to
+  `events.jsonl`. On start it restores the newest session whose status is
+  still `active`. A new scenario can't be loaded while the current session has
+  steps that ran, until Cleanup succeeds. Cleanup runs for **every** step
+  (Cleanup is idempotent), in reverse order, and the session closes only when
+  every step's Verify confirms its artifact is gone. Empty artifact folders are
+  then removed; folders with unexpected content are left and reported.
+- **Options:** Multiple concurrent sessions; cleanup only steps that ran;
+  recursive delete of the artifact folder.
+- **Why:** Keeps it simple and makes it hard to leave artifacts behind. A
+  recursive delete would be simpler but could remove things the tool didn't
+  create.
+
+## D8. Artifact location
+
+- **Decision:** Artifacts go to `%ProgramData%\<ArtifactFolder>\<SessionId>\`.
+  `ArtifactFolder` is a scenario parameter (default `TTX-Lab`), validated as a
+  relative path with no `..`. Session state and logs stay under `runs/`.
+- **Why:** Requested by the project owner. Per-session subfolders keep
+  sessions apart and make cleanup exact.
+
+## D9. Checks without a Windows host
+
+- **Decision:** Development checks run under PowerShell 7 on Linux:
+  `tests/Test-Syntax.ps1`, `tests/Invoke-SmokeTest.ps1` (with `ProgramData`
+  pointed at a temp folder), and PSScriptAnalyzer's `PSUseCompatibleSyntax`,
+  `PSUseCompatibleCommands`, and `PSUseCompatibleTypes` rules targeting
+  Windows PowerShell 5.1. Final verification is on the Windows lab host.
+- **Why:** Catches 7-only syntax and most logic bugs before a lab round trip.
