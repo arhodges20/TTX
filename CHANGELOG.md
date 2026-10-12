@@ -10,6 +10,14 @@ All notable changes to this project are recorded here.
   ignores `-Include`. It now filters by extension.
 
 ### Added
+- Real, benign modules for the scheduled-task scenario: `stage-script`
+  (writes a script that only appends a line to a log beside it),
+  `register-scheduled-task` (registers a real logon-triggered task, tagged
+  with the session id), `run-scheduled-task` (starts the task and waits for
+  the script's log). Cleanup unregisters the task and removes the files, and
+  never touches a same-named task this session didn't create.
+- `ScriptName` and `TaskName` scenario parameters, editable at load time.
+- `tests/fixtures/scenarios/smoke-stub`: stub scenario for engine tests.
 - Artifact reporting: modules call `Register-TtxArtifact` (type, location,
   detail) for everything they create or run; each step stores its artifacts
   and the PID it ran in, and the event log lists them. Generic file helpers
@@ -50,5 +58,9 @@ All notable changes to this project are recorded here.
   "How to test on the lab host" procedure for Milestone 1.
 
 ### Changed
+- "Persistence via scheduled task" now uses the real modules instead of stubs.
+- `Invoke-SmokeTest.ps1` defaults to the `smoke-stub` fixture, checks every
+  reported artifact exists after Run and is gone after Cleanup, and takes
+  `-ScenarioId persistence-scheduled-task` to test the real modules on Windows.
 - Engine: replaced multi-line method chaining with plain statements, for
   Windows PowerShell 5.1 parser safety.
