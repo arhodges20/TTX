@@ -4,6 +4,11 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+- `tests/Test-Syntax.ps1` parsed every file (CSS, HTML, Markdown) as
+  PowerShell on Windows PowerShell 5.1, where `Get-ChildItem -LiteralPath`
+  ignores `-Include`. It now filters by extension.
+
 ### Added
 - Placeholder project brief (`docs/PROJECT-BRIEF.md`) with interim constraints.
 - Repo scaffold: `server/`, `ui/`, `modules/`, `scenarios/`, `tests/`,
