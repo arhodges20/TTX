@@ -29,3 +29,7 @@ All notable changes to this project are recorded here.
   on restart, and steps that were in progress are marked `interrupted`.
 - Tests: `tests/Test-Syntax.ps1` (parse, JSON, module contract) and
   `tests/Invoke-SmokeTest.ps1` (end-to-end engine run, restart, cleanup).
+- HTTP server (`server/Server.psm1`) and entry point
+  (`Start-ControlCenter.ps1`): `HttpListener` on `http://localhost:8080/`,
+  JSON API for scenarios, sessions, run step, run all, and cleanup. POSTs
+  require an `X-TTX-Request` header and the Host must be localhost.

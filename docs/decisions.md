@@ -92,3 +92,14 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   `PSUseCompatibleCommands`, and `PSUseCompatibleTypes` rules targeting
   Windows PowerShell 5.1. Final verification is on the Windows lab host.
 - **Why:** Catches 7-only syntax and most logic bugs before a lab round trip.
+
+## D10. Localhost hardening for the API
+
+- **Decision:** Bind only `http://localhost:<port>/`, reject any non-localhost
+  `Host` header, and require an `X-TTX-Request: 1` header on every POST.
+- **Options:** No checks (localhost-only binding); a session token.
+- **Why:** A web page open in the same browser can't send that custom header
+  cross-origin without a CORS preflight, which this server never approves, so
+  another site can't trigger runs or cleanup. The Host check blocks DNS
+  rebinding. Both are a few lines; a token adds setup for little extra benefit
+  in a lab.
