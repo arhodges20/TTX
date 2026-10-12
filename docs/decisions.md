@@ -103,3 +103,18 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   another site can't trigger runs or cleanup. The Host check blocks DNS
   rebinding. Both are a few lines; a token adds setup for little extra benefit
   in a lab.
+
+## D11. Real, benign artifacts instead of stubs
+
+- **Decision:** Modules create **real** host artifacts that the EDR records
+  (files, scheduled tasks, processes), each of which is inert: e.g. a
+  scheduled task whose action runs a script that only appends a line to a log
+  file. Each step reports the artifacts it created (type, location, detail)
+  and the PID it ran in, and the UI shows them to the facilitator. Stub
+  modules remain for engine tests.
+- **Options:** Keep stubs (marker files only); simulate telemetry by writing
+  fake log entries.
+- **Why:** The product's purpose is to give analysts genuine telemetry to hunt
+  in CrowdStrike Falcon. Marker files don't produce the events analysts would
+  look for (task registration, task-launched processes). Fake log entries
+  wouldn't appear in the EDR at all.
