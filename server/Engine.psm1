@@ -292,7 +292,7 @@ function Complete-TtxJob {
         if (-not $msg) { $msg = $reason }
         if (-not $msg -and $jobErrors) { $msg = ($jobErrors | ForEach-Object { $_.ToString() }) -join '; ' }
         if (-not $msg) { $msg = 'Step runner produced no result.' }
-        $result = @{ ok = $false; error = $msg; verify = $null; logs = @() }
+        $result = @{ ok = $false; error = $msg; verify = $null; logs = @(); artifacts = @(); pid = $null }
     }
 
     foreach ($log in @($result.logs)) {
@@ -307,6 +307,12 @@ function Complete-TtxJob {
     $ok = [bool]$result.ok
 
     if ($item.op -eq 'run') {
+        # What this run created or ran on the host, for the facilitator.
+        $step.artifacts = @($result.artifacts | Where-Object { $null -ne $_ })
+        $step.runnerPid = $result.pid
+        foreach ($a in $step.artifacts) {
+            Add-TtxEvent -StepId $step.id -Message "Artifact ($($a.type)): $($a.location)"
+        }
         if ($ok) {
             $step.status = 'succeeded'
             Add-TtxEvent -StepId $step.id -Message "Succeeded. Verify: $($result.verify.detail)"
@@ -504,6 +510,8 @@ function New-TtxSession {
                 describeError    = $null
                 status           = 'pending'
                 touched          = $false
+                artifacts        = @()
+                runnerPid        = $null
                 lastOp           = $null
                 verify           = $null
                 error            = $null

@@ -10,6 +10,11 @@ All notable changes to this project are recorded here.
   ignores `-Include`. It now filters by extension.
 
 ### Added
+- Artifact reporting: modules call `Register-TtxArtifact` (type, location,
+  detail) for everything they create or run; each step stores its artifacts
+  and the PID it ran in, and the event log lists them. Generic file helpers
+  (`New-/Test-/Remove-TtxArtifactFile`, `Get-TtxArtifactPath`) in
+  `modules/_common/TtxArtifacts.ps1` (renamed from `TtxMarker.ps1`).
 - Placeholder project brief (`docs/PROJECT-BRIEF.md`) with interim constraints.
 - Repo scaffold: `server/`, `ui/`, `modules/`, `scenarios/`, `tests/`,
   gitignored `runs/`; README, CHANGELOG, and decisions log.

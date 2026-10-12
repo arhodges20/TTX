@@ -8,7 +8,8 @@
     the shared marker helpers and the module, calls the contract functions, and
     returns:
 
-        { ok, error, verify: { passed, detail }, info, hunt, logs: [ ... ] }
+        { ok, error, verify: { passed, detail }, info, hunt, logs: [ ... ],
+          artifacts: [ { type, location, detail, ts } ], pid }
 
     See docs/module-contract.md.
 #>
@@ -21,6 +22,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $TtxLogBuffer = New-Object System.Collections.ArrayList
+$TtxArtifactBuffer = New-Object System.Collections.ArrayList
 
 function Write-TtxLog {
     param(
@@ -28,6 +30,16 @@ function Write-TtxLog {
         [ValidateSet('info', 'warn', 'error')][string]$Level = 'info'
     )
     [void]$TtxLogBuffer.Add(@{ ts = (Get-Date).ToString('o'); level = $Level; message = $Message })
+}
+
+# Records something the step created or ran on the host, for the facilitator.
+function Register-TtxArtifact {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('file', 'scheduled-task', 'process')][string]$Type,
+        [Parameter(Mandatory = $true)][string]$Location,
+        [string]$Detail = ''
+    )
+    [void]$TtxArtifactBuffer.Add(@{ ts = (Get-Date).ToString('o'); type = $Type; location = $Location; detail = $Detail })
 }
 
 function Invoke-TtxVerifyCheck {
@@ -40,17 +52,19 @@ function Invoke-TtxVerifyCheck {
 }
 
 $result = @{
-    ok     = $false
-    error  = $null
-    verify = $null
-    info   = $null
-    hunt   = $null
-    logs   = $TtxLogBuffer
+    ok        = $false
+    error     = $null
+    verify    = $null
+    info      = $null
+    hunt      = $null
+    logs      = $TtxLogBuffer
+    artifacts = $TtxArtifactBuffer
+    pid       = $PID
 }
 
 try {
     . (Join-Path $PSScriptRoot 'TtxCommon.ps1')
-    . (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules') '_common') 'TtxMarker.ps1')
+    . (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules') '_common') 'TtxArtifacts.ps1')
 
     $context = ConvertFrom-TtxJson -Json $ContextJson
     if ($null -eq $context.Parameters) { $context.Parameters = @{} }
