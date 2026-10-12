@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $failures = 0
 
-foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File -Include *.ps1, *.psm1 |
+foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in '.ps1', '.psm1' } |
         Where-Object { $_.FullName -notmatch '[\\/](runs|\.git)[\\/]' }) {
     $tokens = $null
     $errors = $null

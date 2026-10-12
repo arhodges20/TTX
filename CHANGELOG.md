@@ -4,7 +4,28 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+- `tests/Test-Syntax.ps1` parsed every file (CSS, HTML, Markdown) as
+  PowerShell on Windows PowerShell 5.1, where `Get-ChildItem -LiteralPath`
+  ignores `-Include`. It now filters by extension.
+
 ### Added
+- README: Milestone 2 status, artifact details, and lab-host test steps.
+- UI: per-step "Artifacts on host" (type, location, detail; struck through
+  once cleaned) and the PID the step ran in; session parameters in the header.
+- Real, benign modules for the scheduled-task scenario: `stage-script`
+  (writes a script that only appends a line to a log beside it),
+  `register-scheduled-task` (registers a real logon-triggered task, tagged
+  with the session id), `run-scheduled-task` (starts the task and waits for
+  the script's log). Cleanup unregisters the task and removes the files, and
+  never touches a same-named task this session didn't create.
+- `ScriptName` and `TaskName` scenario parameters, editable at load time.
+- `tests/fixtures/scenarios/smoke-stub`: stub scenario for engine tests.
+- Artifact reporting: modules call `Register-TtxArtifact` (type, location,
+  detail) for everything they create or run; each step stores its artifacts
+  and the PID it ran in, and the event log lists them. Generic file helpers
+  (`New-/Test-/Remove-TtxArtifactFile`, `Get-TtxArtifactPath`) in
+  `modules/_common/TtxArtifacts.ps1` (renamed from `TtxMarker.ps1`).
 - Placeholder project brief (`docs/PROJECT-BRIEF.md`) with interim constraints.
 - Repo scaffold: `server/`, `ui/`, `modules/`, `scenarios/`, `tests/`,
   gitignored `runs/`; README, CHANGELOG, and decisions log.
@@ -40,5 +61,9 @@ All notable changes to this project are recorded here.
   "How to test on the lab host" procedure for Milestone 1.
 
 ### Changed
+- "Persistence via scheduled task" now uses the real modules instead of stubs.
+- `Invoke-SmokeTest.ps1` defaults to the `smoke-stub` fixture, checks every
+  reported artifact exists after Run and is gone after Cleanup, and takes
+  `-ScenarioId persistence-scheduled-task` to test the real modules on Windows.
 - Engine: replaced multi-line method chaining with plain statements, for
   Windows PowerShell 5.1 parser safety.

@@ -15,8 +15,8 @@ The folder name must equal the module's `Id`. Folders starting with `_`
 
 ## Required functions
 
-Every `module.ps1` defines exactly these five functions. Target Windows
-PowerShell 5.1.
+Every `module.ps1` defines these five functions (it may define private
+helpers too). Target Windows PowerShell 5.1.
 
 | Function | Returns | Purpose |
 |---|---|---|
@@ -35,7 +35,7 @@ PowerShell 5.1.
     Description = 'What the step does, in one or two sentences.'
     Version     = '0.1.0'
     Technique   = 'T1053.005'   # ATT&CK reference label; '' if none
-    IsStub      = $true         # $true while the module only writes markers
+    IsStub      = $false        # $true for stub modules that only write marker files
     Parameters  = @(
         @{ Name = 'TaskName'; Default = 'TTX-Lab-Updater'; Description = '...' }
     )
@@ -54,17 +54,28 @@ PowerShell 5.1.
 
 ## Provided by the runner
 
-The step runner (`server/StepRunner.ps1`) dot-sources these before the module:
+The step runner (`server/StepRunner.ps1`) provides these before loading the
+module:
 
 - `Write-TtxLog -Message <string> [-Level info|warn|error]`: adds a line to
   the session's event log.
-- Marker helpers from `modules/_common/TtxMarker.ps1`:
-  - `New-TtxMarker -Context $Context -Description <string> [-Name <file>]`
-  - `Test-TtxMarker -Context $Context [-Name <file>]`
-  - `Remove-TtxMarker -Context $Context [-Name <file>]`
+- `Register-TtxArtifact -Type file|scheduled-task|process -Location <string> [-Detail <string>]`:
+  records something the step created or ran on the host. The facilitator sees
+  it under "Artifacts on host", and it is stored in the session state. Call it
+  from `Invoke-TtxRun` for **everything** the step creates or runs.
+- File helpers from `modules/_common/TtxArtifacts.ps1`. All of them refuse any
+  path outside `%ProgramData%`, and names must be plain file names inside
+  `Context.ArtifactRoot`:
+  - `New-TtxArtifactFile -Context $Context -Name <file> -Content <string> [-Detail <string>]`
+    writes the file and registers it as a `file` artifact.
+  - `Test-TtxArtifactFile -Context $Context -Name <file>`
+  - `Remove-TtxArtifactFile -Context $Context -Name <file>`
+  - `Get-TtxArtifactPath -Context $Context -Name <file>` returns the full path.
+  - Marker shortcuts used by stub modules: `New-TtxMarker`, `Test-TtxMarker`,
+    `Remove-TtxMarker` (name defaults to `<StepId>.marker`).
 
-  `-Name` defaults to `<StepId>.marker`. The helpers refuse any path outside
-  `%ProgramData%`.
+The result of every Run also records the PID of the `powershell.exe` the step
+ran in, so the facilitator can find it in the EDR process tree.
 
 ## How the engine calls a module
 
@@ -77,9 +88,16 @@ The step runner (`server/StepRunner.ps1`) dot-sources these before the module:
 
 ## Rules
 
-- Benign by design: only inert stand-in artifacts. No functional malware,
+- Benign by design: artifacts are real but inert. No functional malware,
   payloads, injection, credential access, or anything harmful outside a lab.
-- Write only under `Context.ArtifactRoot` (until a later milestone defines
-  other allowed, fully cleaned-up artifact types).
-- Cleanup must remove everything Run created.
+  A script a module writes may only do harmless things (e.g. append a line to
+  a log file next to itself).
+- Files go only under `Context.ArtifactRoot`, through the file helpers.
+- Other artifact types (e.g. scheduled tasks) must be tagged with the session
+  id so the module can prove ownership. Run refuses to overwrite, and Cleanup
+  never removes, anything that doesn't carry this session's tag.
+- Cleanup must remove everything Run created, and Verify must then report it
+  gone.
+- Register every artifact with `Register-TtxArtifact` (the file helpers do
+  this for files).
 - Use `Write-TtxLog` rather than `Write-Host`.

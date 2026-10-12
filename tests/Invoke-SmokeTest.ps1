@@ -4,13 +4,19 @@
 
 .DESCRIPTION
     Copies the app into a temp folder (so your real runs/ is untouched), loads
-    the scheduled-task scenario with ArtifactFolder 'TTX-Lab-SmokeTest', runs
-    all steps, simulates a server restart, cleans up, and checks that every
-    marker and folder is gone. Exit code 0 = pass.
+    a scenario with ArtifactFolder 'TTX-Lab-SmokeTest', runs a single step and
+    then all steps, simulates a server restart, cleans up, and checks that every
+    artifact the steps reported is gone. Exit code 0 = pass.
+
+    The default scenario, 'smoke-stub' (tests/fixtures), uses stub modules that
+    only write marker files, so it runs anywhere. On a Windows lab host, use
+    -ScenarioId persistence-scheduled-task to test the real modules: that
+    creates and removes a real, benign scheduled task named
+    'TTX-Lab-SmokeTest-Updater'.
 #>
 [CmdletBinding()]
 param(
-    [string]$ScenarioId = 'persistence-scheduled-task',
+    [string]$ScenarioId = 'smoke-stub',
     [int]$TimeoutSec = 180
 )
 
@@ -34,6 +40,24 @@ function Wait-Idle {
     }
 }
 
+# Does an artifact a step reported still exist on the host?
+function Test-ArtifactPresent {
+    param([hashtable]$Artifact)
+    switch ($Artifact.type) {
+        'file' {
+            # Only files under ProgramData; e.g. System32\Tasks may not be readable without admin.
+            if (-not $Artifact.location.StartsWith($env:ProgramData, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+            return (Test-Path -LiteralPath $Artifact.location)
+        }
+        'scheduled-task' {
+            $i = $Artifact.location.LastIndexOf('\')
+            $task = Get-ScheduledTask -TaskPath $Artifact.location.Substring(0, $i + 1) -TaskName $Artifact.location.Substring($i + 1) -ErrorAction SilentlyContinue
+            return ($null -ne $task)
+        }
+        default { return $null }   # e.g. 'process': nothing left to check
+    }
+}
+
 function Import-Engine {
     Import-Module (Join-Path (Join-Path $work 'server') 'Engine.psm1') -Force
     Initialize-TtxEngine -Root $work -StepTimeoutSec 60
@@ -44,18 +68,24 @@ try {
     foreach ($d in 'server', 'modules', 'scenarios') {
         Copy-Item -LiteralPath (Join-Path $repo $d) -Destination $work -Recurse
     }
+    $fixtures = Join-Path (Join-Path (Join-Path $repo 'tests') 'fixtures') 'scenarios'
+    foreach ($dir in Get-ChildItem -LiteralPath $fixtures -Directory) {
+        Copy-Item -LiteralPath $dir.FullName -Destination (Join-Path $work 'scenarios') -Recurse
+    }
     Import-Engine
 
     $scenarios = Get-TtxScenarioList
     $sc = $scenarios | Where-Object { $_.id -eq $ScenarioId }
     Check ($null -ne $sc -and $sc.valid) "scenario '$ScenarioId' is listed and valid"
 
+    $params = @{ ArtifactFolder = 'TTX-Lab-SmokeTest'; TaskName = 'TTX-Lab-SmokeTest-Updater' }
+
     $bad = $null
     try { New-TtxSession -ScenarioId $ScenarioId -Parameters @{ ArtifactFolder = '..\Windows' } | Out-Null }
     catch { $bad = $_.Exception }
     Check ($bad -is [System.ArgumentException]) "ArtifactFolder '..\Windows' is rejected"
 
-    $view = New-TtxSession -ScenarioId $ScenarioId -Parameters @{ ArtifactFolder = 'TTX-Lab-SmokeTest' }
+    $view = New-TtxSession -ScenarioId $ScenarioId -Parameters $params
     $session = $view.session
     $root = $session.artifactRoot
     Write-Host "     session $($session.sessionId), artifacts in $root"
@@ -76,8 +106,14 @@ try {
     Wait-Idle
     $steps = (Get-TtxSessionView).session.steps
     Check (@($steps | Where-Object { $_.status -ne 'succeeded' }).Count -eq 0) 'run all: every step succeeded'
+    $artifacts = @()
     foreach ($s in $steps) {
-        Check (Test-Path -LiteralPath (Join-Path $root "$($s.id).marker")) "marker for '$($s.id)' exists"
+        Check (@($s.artifacts).Count -gt 0) "step '$($s.id)' reported artifacts (ran in PID $($s.runnerPid))"
+        foreach ($a in @($s.artifacts)) {
+            $artifacts += , $a
+            $present = Test-ArtifactPresent $a
+            if ($null -ne $present) { Check $present "$($a.type) exists: $($a.location)" }
+        }
     }
 
     # Simulate a restart: reload the module and engine from disk.
@@ -91,6 +127,10 @@ try {
     $after = (Get-TtxSessionView)
     Check ($after.session.status -eq 'cleaned') 'session status is cleaned'
     Check (@($after.session.steps | Where-Object { $_.status -ne 'cleaned' }).Count -eq 0) 'every step cleaned'
+    foreach ($a in $artifacts) {
+        $present = Test-ArtifactPresent $a
+        if ($null -ne $present) { Check (-not $present) "$($a.type) removed: $($a.location)" }
+    }
     Check (-not (Test-Path -LiteralPath $root)) 'session artifact folder removed'
     Check (-not (Test-Path -LiteralPath (Join-Path $env:ProgramData 'TTX-Lab-SmokeTest'))) 'empty ArtifactFolder removed'
     Check ($after.eventCount -gt 0) "event log has $($after.eventCount) events"

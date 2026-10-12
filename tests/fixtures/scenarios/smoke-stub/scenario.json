@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "smoke-stub",
+  "name": "Smoke test (stub modules)",
+  "summary": "Engine test scenario. Stub modules only write and remove marker files.",
+  "steps": [
+    { "id": "stage-script", "title": "Stub: stage", "module": "stub-stage-script" },
+    { "id": "register-task", "title": "Stub: register", "module": "stub-register-scheduled-task" },
+    { "id": "task-executes", "title": "Stub: execute", "module": "stub-task-execution" }
+  ]
+}

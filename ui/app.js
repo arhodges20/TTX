@@ -179,6 +179,9 @@ function renderSession(s) {
   $('s-name').textContent = s.scenarioName;
   $('s-id').textContent = s.sessionId;
   $('s-root').textContent = s.artifactRoot;
+  const params = s.parameters || {};
+  $('s-params').replaceChildren(...Object.keys(params).sort().map(k =>
+    el('code', { class: 'param-chip' }, `${k}=${params[k]}`)));
   $('s-status').replaceWith(Object.assign(pill(s.status), { id: 's-status' }));
   $('btn-run-all').disabled = !active || ui.busy;
   $('btn-cleanup').disabled = !active;
@@ -208,6 +211,18 @@ function renderStep(st, index, active) {
       el('span', { class: 'muted' }, 'What: '), h.what))) : null;
 
   const notes = asArray(st.facilitatorNotes);
+  const artifacts = asArray(st.artifacts);
+  const removed = st.status === 'cleaned';
+  const artifactBlock = artifacts.length ? [
+    el('h4', null, removed ? 'Artifacts on host (removed by cleanup)' : 'Artifacts on host'),
+    el('ul', { class: 'artifacts' + (removed ? ' removed' : '') }, artifacts.map(a =>
+      el('li', null,
+        el('span', { class: 'tag' }, a.type), ' ',
+        el('code', null, a.location),
+        a.detail ? el('div', { class: 'artifact-detail' }, a.detail) : null))),
+    st.runnerPid ? el('div', { class: 'artifact-detail' },
+      `Step ran in powershell.exe PID ${st.runnerPid}` + (st.startedAt ? ` at ${fmtTime(st.startedAt)}` : '') + '.') : null,
+  ] : null;
   return el('li', { class: 'step', 'data-status': st.status },
     el('div', { class: 'step-head' },
       el('span', { class: 'step-num' }, `${index + 1}.`),
@@ -223,6 +238,7 @@ function renderStep(st, index, active) {
       info.isStub ? el('span', { class: 'tag tag-stub' }, 'stub') : null, ' ',
       info.technique ? el('span', { class: 'tag' }, info.technique) : null),
     result,
+    artifactBlock,
     notes.length ? [el('h4', null, 'Facilitator notes'), el('ul', null, notes.map(n => el('li', null, n)))] : null,
     details);
 }

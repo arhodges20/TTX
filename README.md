@@ -1,34 +1,51 @@
 # TTX Control Center
 
 A local tool for running **technical tabletop exercises (TTX)** on a Windows
-lab host. A facilitator loads a scenario, runs its steps one at a time or all
-together, watches live status and an event log, reads facilitator notes and
-hunt guidance for each step, and cleans everything up afterwards.
+lab host. Each scenario step creates **real, benign artifacts** that the EDR
+(CrowdStrike Falcon) records: files, scheduled tasks, task-launched processes.
+Analysts hunt for them in the EDR console, CTF-style. The facilitator runs the
+steps from this tool and sees exactly what each step created and where, plus
+facilitator notes and hunt guidance. Afterwards, Cleanup removes everything.
 
-**Benign by design:** steps use only inert stand-in artifacts (marker files),
-and every step has a Cleanup whose result is verified.
+**Benign by design:** artifacts are real but inert. For example, the scheduled
+task runs a script whose only action is to append one line to a log file. Every
+step has a Cleanup whose result is verified.
 
 > The project brief lives in [docs/PROJECT-BRIEF.md](docs/PROJECT-BRIEF.md).
 > **It is currently a placeholder**: the full brief still needs to be added.
 
 ## Status
 
-**Milestone 1: control center shell.** Built; awaiting lab-host testing.
+**Milestone 1, control center shell:** done and tested on the lab host
+(Windows Server 2022, PowerShell 5.1).
 
-- Lists scenarios from `scenarios/`, loads one, and shows its steps in order.
-- Runs a single step or all steps in background jobs. Status and the event log
-  update live.
-- Shows each step's facilitator notes and hunt guidance.
-- Cleanup runs every step's Cleanup in reverse order and verifies it.
-- Session state is saved under `runs/`, so Cleanup still works after a restart.
-- One scenario: **Persistence via scheduled task**, made of **stub** modules
-  that only log and write/remove marker files. No scheduled task is created.
+**Milestone 2, real artifacts:** built; awaiting lab-host testing.
+
+- The "Persistence via scheduled task" scenario now creates real, benign artifacts:
+  1. **Stage script:** writes `C:\ProgramData\<ArtifactFolder>\<SessionId>\updater.ps1`.
+     When run, the script only appends one line (time, user, computer) to
+     `updater.log` beside it.
+  2. **Register task:** registers a real scheduled task `\TTX-Lab-Updater`
+     with an at-logon trigger for the current user. Its action is
+     `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File <script>`.
+     The task description carries the session id.
+  3. **Task runs:** starts the task once, as a logon would. The Task Scheduler
+     launches powershell.exe, the script runs, and the step waits for
+     `updater.log`.
+- Each step shows "Artifacts on host" (paths, task name, exact command line)
+  and the PID of the powershell.exe it ran in.
+- `ArtifactFolder`, `ScriptName`, and `TaskName` can be changed when loading
+  the scenario, so each exercise can use different names.
+- Cleanup unregisters the task and deletes the files. It never touches a
+  same-named task that this session didn't create.
+- **Note:** until Cleanup runs, the task fires on its own at every logon of
+  that user. The only effect is another line in `updater.log`.
 
 ## Requirements
 
 - Windows 10/11 or Windows Server with **Windows PowerShell 5.1** (built in).
 - A web browser.
-- Admin rights are not required for this milestone.
+- Admin rights are not required. Tasks are registered for the current user.
 
 ## Run it
 
@@ -57,11 +74,11 @@ Browser (ui/)  --HTTP-->  Start-ControlCenter.ps1
                             modules/<id>/module.ps1   Run / Verify / Cleanup / Hunt
 ```
 
-- **Artifacts** go to `%ProgramData%\<ArtifactFolder>\<SessionId>\`.
-  `ArtifactFolder` is a scenario parameter (default `TTX-Lab`) that you can
-  change when loading the scenario.
+- **Files** go to `%ProgramData%\<ArtifactFolder>\<SessionId>\`
+  (`ArtifactFolder` defaults to `TTX-Lab`). Other artifacts, such as the
+  scheduled task, are tagged with the session id.
 - **Session state and logs** go to `runs\<SessionId>\state.json` and
-  `events.jsonl` (gitignored).
+  `events.jsonl` (gitignored). They include every artifact each step reported.
 - Only **one session** is active at a time. You can't load another scenario
   until the current session is cleaned up, unless none of its steps ran.
 - **Run all** stops at the first failed step. **Cleanup** stops anything in
@@ -88,20 +105,14 @@ runs/                     Session state and logs (gitignored)
 
 ## How to test on the lab host
 
-### Milestone 1: control center shell
+### Milestone 2: real artifacts
 
-Run everything from a normal (non-admin) Windows PowerShell 5.1 console, in
-the repo folder.
+Run these from Windows PowerShell 5.1 on the lab host. The EDR should be
+running, since seeing these artifacts in Falcon is the point.
 
-**0. Get the code**
-
-```powershell
-git fetch origin
-git checkout claude/wonderful-rubin-xmb6gh
-git pull
-# Only if you downloaded a ZIP instead of cloning:
-Get-ChildItem -Recurse | Unblock-File
-```
+**0. Get the code.** Download the branch ZIP, extract it to a fresh folder
+(e.g. `C:\TTX2`), then run `Get-ChildItem -Recurse | Unblock-File` in that
+folder.
 
 **1. Static checks.** Expect `All syntax checks passed.`
 
@@ -109,58 +120,55 @@ Get-ChildItem -Recurse | Unblock-File
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-Syntax.ps1
 ```
 
-**2. Engine smoke test.** This runs the whole scenario without the web UI,
-simulates a restart, and cleans up. It uses a temp copy of the app and
-`C:\ProgramData\TTX-Lab-SmokeTest`, so your real `runs\` folder isn't touched.
-Expect every line to read `ok` and `Smoke test passed.` It takes 10–30
-seconds.
+**2. Engine smoke test (stub modules, nothing real).** Expect `Smoke test passed.`
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-SmokeTest.ps1
 ```
 
-**3. Start the control center**
+**3. Real-module smoke test.** This creates and removes a real task,
+`\TTX-Lab-SmokeTest-Updater`, plus files under
+`C:\ProgramData\TTX-Lab-SmokeTest`. Expect `Smoke test passed.` It takes
+about 20–60 seconds.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-ControlCenter.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-SmokeTest.ps1 -ScenarioId persistence-scheduled-task
+Get-ScheduledTask -TaskName 'TTX-Lab-SmokeTest-Updater' -ErrorAction SilentlyContinue   # expect nothing
 ```
 
-The browser should open <http://localhost:8080/> showing **connected**
-(top right).
+**4. UI walkthrough.** Start the server
+(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-ControlCenter.ps1`),
+load the scenario, then click **Run all**:
 
-**4. Walk through the UI.** Keep a second PowerShell window open for the
-checks.
+| Check | Expect |
+|---|---|
+| All 3 steps | `SUCCEEDED`, each with "Artifacts on host" and a PID. |
+| `Get-ChildItem C:\ProgramData\TTX-Lab -Recurse` | `updater.ps1` and `updater.log` in the session folder. |
+| `Get-Content C:\ProgramData\TTX-Lab\*\updater.log` | A line like `2026-…  ran as Administrator on <HOST>`. |
+| `Get-ScheduledTask -TaskName TTX-Lab-Updater \| Format-List *` | The task: description with the session id, at-logon trigger, powershell.exe action. |
+| `taskschd.msc` → Task Scheduler Library | `TTX-Lab-Updater` is visible with its trigger and action. (The History tab only fills in if task history is enabled.) |
+| Falcon console | The script write, the task registration, and powershell.exe launched by svchost.exe (Schedule). |
+| **Cleanup** | All steps `CLEANED`; the task is gone (`Get-ScheduledTask` returns nothing); `Test-Path C:\ProgramData\TTX-Lab` is `False`. |
 
-| # | Do this | Expect |
-|---|---|---|
-| a | Click **Persistence via scheduled task**. Leave `ArtifactFolder` = `TTX-Lab`. Click **Load scenario**. | 3 steps, each `PENDING`, with a STUB tag, facilitator notes, and a "Hunt guidance" toggle. The event log shows "Session … created". |
-| b | Click **Run step** on step 1. | The step goes `RUNNING` and then `SUCCEEDED` within a few seconds. The log shows STUB and "Wrote marker file" lines. |
-| c | Click **Run all**. | All 3 steps reach `SUCCEEDED`, one after another. |
-| d | Second window: `Get-ChildItem C:\ProgramData\TTX-Lab -Recurse` | One `<SessionId>` folder containing `stage-script.marker`, `register-task.marker`, and `task-executes.marker`. |
-| e | Second window: `Get-ScheduledTask -TaskName 'TTX-Lab-Updater' -ErrorAction SilentlyContinue` | **Nothing.** The stubs never create a real task. |
-| f | Click **Load scenario** again. | A red banner: the session has steps that ran; press Cleanup first. |
-| g | **Restart test:** press Ctrl+C in the server console, then start it again (step 3) and refresh the browser. | The same session and statuses come back. The log ends with "Server restarted; restored session …". |
-| h | Click **Cleanup** and confirm. | Steps clean up in reverse order (3, 2, 1), each `CLEANED` with "Cleanup check: … absent". The session shows `CLEANED`, and the log ends with "Cleanup complete". |
-| i | Second window: `Test-Path C:\ProgramData\TTX-Lab` | `False`. |
-| j | **Interrupt test:** Load the scenario, click **Run all**, then click **Cleanup** right away. | Whichever step was running is logged as "Interrupted. Stopped for cleanup." and the rest are logged as "not run". Cleanup still finishes with the session `CLEANED`. If all 3 steps finished before you clicked, try again faster; the result is fine either way. |
-| k | Look in `runs\`. | One folder per session, each with `state.json` and `events.jsonl`. |
+**Report back:** the output of steps 1–3, any rows that didn't match, and
+anything Falcon detected or blocked.
 
-**5. Report back:**
+### Milestone 1: control center shell (passed)
 
-- The output of steps 1 and 2. Paste any `FAIL` lines in full.
-- Any rows in the table above that didn't match, with a screenshot.
-- Any red or yellow text in the server console.
-- The output of `$PSVersionTable.PSVersion`.
+Tested on Windows Server 2022, PowerShell 5.1: syntax check, engine smoke
+test (including cleanup), server start, single step, run all, and restart and
+restore. The UI Cleanup button is covered by the Milestone 2 walkthrough.
 
 **Troubleshooting**
 
 - *"Could not listen on http://localhost:8080/"*: another program is using
-  the port. Start with `-Port 8090`. If it says "Access is denied", try an
-  elevated console and report it back.
+  the port. Start with `-Port 8090`.
 - *"running scripts is disabled on this system"*: use the
   `-ExecutionPolicy Bypass` command lines above.
-- Leftover artifacts can always be inspected under `C:\ProgramData\TTX-Lab\`.
-  Marker files are plain JSON text and safe to delete by hand.
+- *Step 3 "did not write … within 30 s"*: the EDR may have blocked the
+  task-launched PowerShell. Check Falcon, then press Cleanup.
+- Leftover artifacts can always be inspected under `C:\ProgramData\TTX-Lab\`
+  and with `Get-ScheduledTask -TaskName TTX-Lab-*`.
 
 ## Development notes
 
