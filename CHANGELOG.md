@@ -33,3 +33,6 @@ All notable changes to this project are recorded here.
   (`Start-ControlCenter.ps1`): `HttpListener` on `http://localhost:8080/`,
   JSON API for scenarios, sessions, run step, run all, and cleanup. POSTs
   require an `X-TTX-Request` header and the Host must be localhost.
+- Web UI (`ui/`): scenario list with parameters, ordered steps with live
+  status, Run step / Run all / Cleanup, facilitator notes, hunt guidance, and
+  a live event log. Polls the server once a second.
