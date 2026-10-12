@@ -26,3 +26,23 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 - **Options:** JSON; YAML; PowerShell data files (`.psd1`).
 - **Why:** PowerShell 5.1 reads JSON natively (`ConvertFrom-Json`) and the
   browser can too. YAML needs an extra module. `.psd1` isn't readable by the UI.
+
+## D4. Module contract: five functions in one `module.ps1`
+
+- **Decision:** A module is `modules/<id>/module.ps1` defining
+  `Get-TtxModuleInfo`, `Invoke-TtxRun`, `Test-TtxVerify`, `Invoke-TtxCleanup`,
+  `Get-TtxHunt`. A step "succeeds" only if Run doesn't throw and Verify passes;
+  a cleanup "succeeds" only if Cleanup doesn't throw and Verify then fails
+  (the artifact is gone).
+- **Options:** PowerShell module manifests (`.psd1` + `.psm1`); separate script
+  per operation; metadata in JSON next to the script.
+- **Why:** One file per module is the easiest thing to read and review.
+  Checking Verify after Cleanup proves the Cleanup works instead of trusting it.
+
+## D5. Shared marker helpers, guarded to `%ProgramData%`
+
+- **Decision:** Modules write markers through shared helpers that refuse any
+  path outside `%ProgramData%`.
+- **Options:** Each module handles its own paths.
+- **Why:** One guard in one place, so a module bug or a bad parameter can't
+  write or delete outside the lab folder.
