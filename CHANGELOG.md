@@ -10,6 +10,8 @@ All notable changes to this project are recorded here.
   ignores `-Include`. It now filters by extension.
 
 ### Added
+- UI: per-step "Artifacts on host" (type, location, detail; struck through
+  once cleaned) and the PID the step ran in; session parameters in the header.
 - Real, benign modules for the scheduled-task scenario: `stage-script`
   (writes a script that only appends a line to a log beside it),
   `register-scheduled-task` (registers a real logon-triggered task, tagged
