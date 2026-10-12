@@ -214,10 +214,11 @@ function Invoke-TtxDescribe {
     param([hashtable]$Step)
     $ps = [System.Management.Automation.PowerShell]::Create()
     try {
-        [void]$ps.AddCommand($script:Ttx.RunnerPath).
-            AddParameter('ModulePath', (Get-TtxModulePath $Step.module)).
-            AddParameter('Operation', 'describe').
-            AddParameter('ContextJson', (ConvertTo-TtxJson -InputObject (Get-TtxStepContext -Step $Step) -Compress))
+        $contextJson = ConvertTo-TtxJson -InputObject (Get-TtxStepContext -Step $Step) -Compress
+        [void]$ps.AddCommand($script:Ttx.RunnerPath)
+        [void]$ps.AddParameter('ModulePath', (Get-TtxModulePath $Step.module))
+        [void]$ps.AddParameter('Operation', 'describe')
+        [void]$ps.AddParameter('ContextJson', $contextJson)
         $out = @($ps.Invoke())
         $json = $out | Where-Object { $_ -is [string] } | Select-Object -Last 1
         if (-not $json) {

@@ -36,3 +36,9 @@ All notable changes to this project are recorded here.
 - Web UI (`ui/`): scenario list with parameters, ordered steps with live
   status, Run step / Run all / Cleanup, facilitator notes, hunt guidance, and
   a live event log. Polls the server once a second.
+- README: how to run, how it works, current status, and a step-by-step
+  "How to test on the lab host" procedure for Milestone 1.
+
+### Changed
+- Engine: replaced multi-line method chaining with plain statements, for
+  Windows PowerShell 5.1 parser safety.
