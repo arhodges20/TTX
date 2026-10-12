@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TTX Control Center</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>TTX Control Center</h1>
+    <span id="conn" class="conn conn-wait" title="Connection to the local server">connecting...</span>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="layout">
+    <aside class="panel" id="scenario-panel">
+      <h2>Scenarios</h2>
+      <ul id="scenario-list" class="scenario-list"></ul>
+      <div id="scenario-detail" hidden>
+        <h3 id="sd-name"></h3>
+        <p id="sd-summary" class="muted"></p>
+        <ul id="sd-objectives" class="objectives"></ul>
+        <form id="sd-form">
+          <div id="sd-params"></div>
+          <button type="submit" class="btn btn-primary">Load scenario</button>
+        </form>
+      </div>
+    </aside>
+
+    <section class="panel" id="session-panel">
+      <div id="no-session" class="muted">No scenario loaded. Pick one on the left.</div>
+      <div id="session" hidden>
+        <div class="session-head">
+          <div>
+            <h2 id="s-name"></h2>
+            <div class="meta">
+              Session <code id="s-id"></code> &middot;
+              <span id="s-status" class="pill"></span>
+            </div>
+            <div class="meta">Artifacts: <code id="s-root"></code></div>
+          </div>
+          <div class="actions">
+            <button id="btn-run-all" class="btn btn-primary">Run all</button>
+            <button id="btn-cleanup" class="btn btn-danger">Cleanup</button>
+          </div>
+        </div>
+        <ol id="steps" class="steps"></ol>
+      </div>
+    </section>
+
+    <section class="panel" id="log-panel">
+      <h2>Event log</h2>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

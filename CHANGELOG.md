@@ -18,3 +18,27 @@ All notable changes to this project are recorded here.
 - Scenario format (`docs/scenario-format.md`) and the "Persistence via
   scheduled task" scenario (`scenarios/persistence-scheduled-task/`), with an
   `ArtifactFolder` parameter (default `TTX-Lab`).
+- Engine (`server/Engine.psm1`): lists and validates scenarios, creates
+  sessions, runs steps in background jobs (one at a time, with a timeout),
+  runs all steps in order and stops on the first failure, and cleans up in
+  reverse order with Verify checked after each Cleanup.
+- Step runner (`server/StepRunner.ps1`): runs one module operation in
+  isolation and returns a JSON result.
+- Session state saved to `runs/<sessionId>/state.json` and
+  `runs/<sessionId>/events.jsonl`; the latest uncleaned session is restored
+  on restart, and steps that were in progress are marked `interrupted`.
+- Tests: `tests/Test-Syntax.ps1` (parse, JSON, module contract) and
+  `tests/Invoke-SmokeTest.ps1` (end-to-end engine run, restart, cleanup).
+- HTTP server (`server/Server.psm1`) and entry point
+  (`Start-ControlCenter.ps1`): `HttpListener` on `http://localhost:8080/`,
+  JSON API for scenarios, sessions, run step, run all, and cleanup. POSTs
+  require an `X-TTX-Request` header and the Host must be localhost.
+- Web UI (`ui/`): scenario list with parameters, ordered steps with live
+  status, Run step / Run all / Cleanup, facilitator notes, hunt guidance, and
+  a live event log. Polls the server once a second.
+- README: how to run, how it works, current status, and a step-by-step
+  "How to test on the lab host" procedure for Milestone 1.
+
+### Changed
+- Engine: replaced multi-line method chaining with plain statements, for
+  Windows PowerShell 5.1 parser safety.
