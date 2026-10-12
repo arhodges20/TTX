@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "persistence-scheduled-task",
+  "name": "Persistence via scheduled task",
+  "summary": "An intruder stages a script in ProgramData and registers a scheduled task so it runs at every logon. All steps are stubs that only write marker files.",
+  "objectives": [
+    "Walk through how scheduled-task persistence looks on a host.",
+    "Identify which logs and artifacts would show each stage.",
+    "Agree who would detect it, how fast, and what the response would be."
+  ],
+  "parameters": [
+    {
+      "name": "ArtifactFolder",
+      "default": "TTX-Lab",
+      "description": "Folder under %ProgramData% where stand-in artifacts are written. Each session gets its own subfolder."
+    }
+  ],
+  "steps": [
+    {
+      "id": "stage-script",
+      "title": "Stage a stand-in script in ProgramData",
+      "module": "stub-stage-script",
+      "params": { "ScriptName": "ttx-updater.ps1" },
+      "facilitatorNotes": [
+        "Setting: the intruder already has a foothold as a standard user and drops a script into a world-writable folder.",
+        "Ask: would anything alert on a new script file in ProgramData? Who would see it?",
+        "Ask: do we collect file-creation events on workstations, and how long do we keep them?"
+      ]
+    },
+    {
+      "id": "register-task",
+      "title": "Register a scheduled task that runs the script at logon",
+      "module": "stub-register-scheduled-task",
+      "params": { "TaskName": "TTX-Lab-Updater", "Trigger": "AtLogOn" },
+      "facilitatorNotes": [
+        "Setting: the intruder registers a task with an innocent-looking name so the script survives reboots.",
+        "Ask: is task-creation auditing (Security 4698) enabled? Is the TaskScheduler Operational log collected centrally?",
+        "Ask: how would an analyst tell this task apart from legitimate updater tasks?"
+      ]
+    },
+    {
+      "id": "task-executes",
+      "title": "The task fires and runs the script",
+      "module": "stub-task-execution",
+      "params": {},
+      "facilitatorNotes": [
+        "Setting: the user logs on the next morning; the task fires and runs the script.",
+        "Ask: what process lineage would we expect to see, and would the EDR flag it?",
+        "Ask: once detected, what are the containment and eradication steps, and who owns them?"
+      ]
+    }
+  ]
+}

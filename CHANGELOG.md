@@ -15,3 +15,6 @@ All notable changes to this project are recorded here.
 - Stub modules for the scheduled-task persistence scenario:
   `stub-stage-script`, `stub-register-scheduled-task`, `stub-task-execution`.
   They only log and write/remove marker files.
+- Scenario format (`docs/scenario-format.md`) and the "Persistence via
+  scheduled task" scenario (`scenarios/persistence-scheduled-task/`), with an
+  `ArtifactFolder` parameter (default `TTX-Lab`).
