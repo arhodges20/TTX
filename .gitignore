@@ -1,0 +1,9 @@
+# Session state and logs (local to the lab host)
+runs/*
+!runs/.gitkeep
+
+# Editor / OS noise
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
