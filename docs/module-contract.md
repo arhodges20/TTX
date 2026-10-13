@@ -1,4 +1,9 @@
-# Module contract
+# Module contract (stub modules, tests only)
+
+> **Since D19, attack steps are Atomic Red Team tests**, not modules. This
+> contract now applies only to the **stub** modules in `modules/stub-*`,
+> which write and remove marker files so the engine can be tested without
+> ART. Do not add technique modules here.
 
 A **module** implements one kind of exercise step. A scenario step names the
 module it uses; the engine runs the module in a background job (a separate
@@ -30,13 +35,13 @@ helpers too). Target Windows PowerShell 5.1.
 
 ```powershell
 @{
-    Id          = 'register-scheduled-task'        # = folder name
-    Name        = 'Register scheduled task'
+    Id          = 'stub-register-scheduled-task'   # = folder name
+    Name        = 'Register scheduled task (STUB)'
     Description = 'What the step does, in one or two sentences.'
     Version     = '1.1.0'
     Technique   = 'T1053.005'   # ATT&CK technique label; '' if none
     Tactic      = 'Persistence' # ATT&CK tactic label; '' or 'Setup' for preconditions
-    IsStub      = $false        # $true for stub modules that only write marker files
+    IsStub      = $true         # stub modules only write marker files
     TimeoutSeconds = 90         # optional; overrides the engine default when larger
     Parameters  = @(
         @{ Name = 'TaskName'; Default = 'TTX-Lab-Updater'; Description = '...' }

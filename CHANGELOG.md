@@ -4,6 +4,78 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Direction change: Atomic Red Team is the execution engine (D19)
+
+#### Added
+- ART integration (`server/Art.ps1`): configurable ART root (default
+  `C:\AtomicRedTeam`; `-ArtRoot` on `Start-ControlCenter.ps1` or
+  `TTX_ART_ROOT`), module imported by path from
+  `<root>\invoke-atomicredteam\Invoke-AtomicRedTeam.psd1`, atomics from
+  `<root>\atomics`.
+- Preflight: ART root, module importable and its version, atomics folder,
+  `powershell-yaml`, alongside the existing Falcon sensor, AID and
+  calibration checks. Missing pieces are clear warnings.
+- ART catalog (`server/CatalogBuilder.ps1`): built in a background job from
+  the installed atomics with the module's `Get-AtomicTechnique`, falling back
+  to `powershell-yaml`; Windows tests only; cached in `runs/catalog.json` and
+  rebuilt when the atomics change. Shows technique, test, GUID, platforms,
+  executor, `elevation_required`, input arguments with defaults, description,
+  prereqs, and flags for prereq downloads, command downloads and high-impact
+  techniques. Search by technique id/name or test name.
+- ART step runner (`server/ArtRunner.ps1`): CheckPrereqs; if missing, the
+  step pauses and GetPrereqs needs explicit confirmation (plus a download
+  acknowledgement when flagged); execution with input-argument overrides and
+  a per-run `-ExecutionLogPath` (`runs/<id>/art-execution-log.csv`); UTC
+  window, exit code (from ART's execution log) and output saved.
+- Read-only verify checks (`server/Verify.ps1`): `file_exists`,
+  `scheduled_task_exists`, `registry_value_exists`, `service_exists`,
+  `process_ran_since_step_start`.
+- Cleanup via `Invoke-AtomicTest -Cleanup` for every executed step, in
+  reverse order, from saved session state (works after a restart); verify is
+  re-run and anything still present fails that step's cleanup. Per-step
+  cleanup result shown and saved.
+- Guardrails: elevated tests blocked unless the control center is elevated;
+  destructive/high-impact techniques (T1485, T1486, T1489, T1490, T1529,
+  T1561) need the technique id typed to be added; UI note that ART command
+  lines and paths may be visible to trainees in telemetry.
+- Scenario builder and ART catalog tabs in the UI; facilitator view shows the
+  atomic's description, the exact command that ran, input arguments, UTC
+  window, exit code, verify and cleanup results, hunt notes and the
+  detection checklist; calibration and a ready-to-hunt estimate.
+- API: `GET /api/catalog`, `GET /api/catalog/status`,
+  `GET /api/catalog/tests/<guid>`, `POST /api/catalog/preview`,
+  `POST /api/catalog/rescan`, `GET /api/scenarios/<id>`,
+  `POST /api/scenarios`, `POST /api/session/steps/<id>/getprereqs`.
+- Example scenario `scenarios/persistence-schtask.json` (T1059.001 ->
+  T1053.005) with `atomic_guid` left empty to choose on the lab host.
+- Test fixtures: mock `Invoke-AtomicTest`/`Get-AtomicTechnique` and a fake
+  technique (T9999.001) that only echoes or writes marker files
+  (`tests/fixtures/art`); smoke test rewritten around them (catalog, run,
+  prereq gate, verify, guardrails, dependency order, cleanup after restart,
+  answer key, stub steps).
+
+#### Changed
+- Scenario format v2: flat `scenarios/<id>.json`; steps reference an ART test
+  by `atomic_guid` with `input_arguments`, `depends_on`, `verify`,
+  `expected_detections`, `hunt_notes`. Validation distinguishes errors,
+  incomplete drafts and warnings.
+- Answer key (`runs/<id>/answer-key.md`) rebuilt from run data: host, AID,
+  scenario, ART version, per-step technique, test name, GUID, the command
+  that ran, UTC window, exit code, verify results, hunt notes and detection
+  checklist results, with the telemetry delay note and ready-to-hunt time.
+- Detection checklist rows come from the step's `expected_detections`.
+- `GET /api/session` accepts `rev` and only resends the session when it
+  changed.
+- Decisions D12, D14 and D15 revised; D19 added; brief updated.
+
+#### Removed
+- Our own technique modules `stage-script`, `register-scheduled-task`,
+  `run-scheduled-task` and the `persistence-scheduled-task` scenario folder.
+  Stub modules remain, for tests only.
+- The loader/implant chain plans (D12) and its options (D14).
+
+### Earlier in this release
+
 ### Added
 - Engine: typed scenario options (`string`, `choice`, `bool`) with
   `profileParameter`/`profiles` (explicit value > profile value > default);

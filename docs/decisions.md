@@ -22,6 +22,8 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 
 ## D3. Scenarios are JSON
 
+> **Layout changed by D19:** scenarios are flat `scenarios/<id>.json` files.
+
 - **Decision:** Each scenario is `scenarios/<id>/scenario.json`.
 - **Options:** JSON; YAML; PowerShell data files (`.psd1`).
 - **Why:** PowerShell 5.1 reads JSON natively (`ConvertFrom-Json`) and the
@@ -106,6 +108,9 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 
 ## D11. Real, benign artifacts instead of stubs
 
+> **Superseded by D19.** Real artifacts now come from Atomic Red Team tests;
+> our own technique modules were removed. Stub modules remain for tests.
+
 - **Decision:** Modules create **real** host artifacts that the EDR records
   (files, scheduled tasks, processes), each of which is inert: e.g. a
   scheduled task whose action runs a script that only appends a line to a log
@@ -119,33 +124,26 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   look for (task registration, task-launched processes). Fake log entries
   wouldn't appear in the EDR at all.
 
-## D12. Scheduled-task scenario: loader/implant chain in four steps
+## D12. Scheduled-task scenario: steps are ART tests, not our modules
 
-> **Status: proposed, not implemented in this build.** This design was drawn
-> up but the loader/implant emulation modules were not built; see D18. The
-> scenario ships the three benign Milestone 2 modules instead. Kept here as
-> the design of record for anyone who picks the chain up later.
+> **Revised by D19.** The earlier design (a four-step loader/implant chain
+> built from our own stand-in scripts and modules) is **withdrawn**; it was
+> never built (see D18) and is now out of scope, because this repo no longer
+> contains technique implementations.
 
-- **Decision:** The scenario models a post-initial-access chain with two inert
-  stand-in scripts: a *loader* (only appends a UTC timestamp to a marker file)
-  and an *implant* (only checks in and creates the scheduled task). Four
-  modules: stage foothold files, implant execution, implant creates
-  persistence, persistence fires. Steps 2 and 3 stay **separate**: each step
-  launches a fresh implant process (`svcmgr.ps1 checkin` / `svcmgr.ps1
-  persist`). In step 3 the implant script itself starts `schtasks.exe` (or
-  calls `Register-ScheduledTask` in cmdlet mode), so schtasks is necessarily
-  its child. The implant records its own PID, its parent PID, the schtasks
-  PID, and exit code; step 3's Verify requires the recorded schtasks parent
-  PID to equal the implant PID. Task settings are written into the implant
-  file at staging time, so its command line stays a plain `-File`.
-- **Options:** Merge steps 2 and 3 into one implant run; a long-lived implant
-  that waits for a "go" signal between steps.
-- **Why:** Keeps each step independently runnable (as requested) while
-  guaranteeing the `powershell.exe (implant) -> schtasks.exe` lineage, and
-  proves it with recorded PIDs instead of assuming it. A waiting implant would
-  be orphaned by a control-center restart and need extra cleanup. The TTX job
-  process remains the implant's parent; the answer key leaves "how did the
-  implant get here?" as the open question for the next exercise.
+- **Decision:** The scheduled-task scenario (`scenarios/persistence-schtask.json`)
+  is a chain of Atomic Red Team tests: a T1059.001 (PowerShell) step followed
+  by a T1053.005 (Scheduled Task) step that `depends_on` it. Each step only
+  references an ART test by `auto_generated_guid` plus input-argument
+  overrides; the commands come from the atomics installed on the lab host. The
+  shipped file leaves `atomic_guid` empty: the facilitator picks the tests
+  from the catalog on the lab host, where the installed ART version is known.
+- **Options:** Our own benign scheduled-task modules (Milestone 2, now
+  removed); hardcoding GUIDs from one ART release.
+- **Why:** ART tests are public, reviewed and widely used, so the commands are
+  known quantities, and the repo carries no attack logic. Leaving the GUIDs to
+  the lab host avoids pinning a test that a different ART version might not
+  have.
 
 ## D13. Detections are likely, not guaranteed
 
@@ -158,43 +156,46 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   can stack well-known suspicious indicators but cannot promise a detection.
   Expected-vs-actual records turn that uncertainty into data.
 
-## D14. DetectionProfile drives the individual options
+## D14. Scenario options and input-argument overrides
 
-> **Status: mechanism built, scenario options not.** The engine's
-> profile-parameter mechanism (explicit value > profile value > default) is
-> implemented and tested (see D18 and the smoke-stub fixture). The specific
-> `DetectionProfile`/`CreateMethod`/`EncodeCommand`/`HiddenWindow` options
-> belong to the unbuilt loader/implant chain (D12), so they are not present in
-> the shipped scenario.
+> **Revised by D19.** The `DetectionProfile`/`CreateMethod`/`EncodeCommand`/
+> `HiddenWindow` options belonged to the withdrawn loader/implant chain and are
+> dropped.
 
-- **Decision:** `DetectionProfile` (`loud` default, `subtle`) supplies
-  defaults for `CreateMethod`, `EncodeCommand`, and `HiddenWindow`. An option
-  the admin sets explicitly when loading the scenario always wins; options
-  left unset take the profile's value. The GUI pre-fills the fields when the
-  profile changes, and keeps later edits.
-  - `loud`: hidden, encoded PowerShell (`-nop -w hidden -ep bypass -enc`),
-    `schtasks.exe /create` from the implant, `schtasks /run`.
-  - `subtle`: `Register-ScheduledTask` (no schtasks.exe), plain `-File`, no
-    hidden window, `Start-ScheduledTask`.
-- **Why:** One switch for the common case, without taking control away from
-  the admin.
+- **Decision:** A step's behavior is tuned only through the ART test's own
+  `input_arguments`: the step stores overrides, and anything it doesn't set
+  takes the atomic's default. The facilitator sets overrides in the scenario
+  builder. The engine's scenario-level option mechanism (typed `parameters`,
+  `profileParameter`/`profiles`, explicit value > profile value > default)
+  stays for scenario-wide settings such as `ArtifactFolder`, and is still
+  covered by tests through the stub fixture.
+- **Why:** ART already defines what each test can vary and documents the
+  defaults; inventing a second layer of attack options would mean writing
+  technique logic, which D19 rules out.
 
-## D15. Task ownership proven from session state
+## D15. Cleanup through ART, driven from saved session state
 
-> **Status: proposed, not implemented.** This applies to the unbuilt
-> `schtasks.exe /create` path (D12). The shipped `register-scheduled-task`
-> module uses `Register-ScheduledTask` and proves ownership with a tagged task
-> description that carries the session id (see that module). Kept for the
-> future schtasks path, which cannot set a description.
+> **Revised by D19.** The earlier design (proving ownership of a task created by
+> our own `schtasks.exe /create` code) is withdrawn with that code.
 
-- **Decision:** `schtasks /create` cannot set a task description, so the task
-  isn't tagged that way. Instead: Run refuses to create a task whose name
-  already exists; Cleanup deletes the task only if session state records that
-  this run created it **and** its action still references this run's loader.
-  The run ID is also embedded (as a comment) in the encoded command and in
-  both stand-in files, so a SOC can confirm the task is benign.
-- **Why:** Keeps the realistic `schtasks.exe /create /tr ...` command line
-  while guaranteeing Cleanup never deletes a task it didn't create.
+- **Decision:** Before a step's run job starts, the engine records in
+  `runs/<id>/state.json` everything Cleanup needs: the ART root and atomics
+  path, technique, `auto_generated_guid`, the resolved input arguments, and
+  the substituted command and cleanup command. The step is marked `executed`
+  from that moment, so a run that crashed or was interrupted is still cleaned
+  up. Cleanup runs `Invoke-AtomicTest <technique> -TestGuids <guid> -Cleanup
+  -InputArgs <recorded>` for every executed step, in reverse order, from that
+  saved state, so it works after a control-center restart. A step's cleanup
+  counts as succeeded only if ART's cleanup completed and the step's `verify`
+  checks that passed after the run now fail (the artifact is gone). Steps that
+  never ran are marked `skipped`.
+- **Options:** Re-read the scenario on cleanup; clean only steps that
+  succeeded; trust ART's cleanup without checking.
+- **Why:** The scenario file can change between run and cleanup; the state
+  file can't. Failed and interrupted runs may still leave artifacts. Checking
+  afterwards proves the cleanup instead of trusting it (same idea as D4).
+  Ownership rests on the recorded GUID and input arguments: Cleanup uses
+  exactly the values the run used, so it targets the same artifacts.
 
 ## D16. Artifact folder without a per-session subfolder (supersedes D8)
 
@@ -223,6 +224,10 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   exercise, using behavior only: no test files, hashes, or sensor tampering.
 
 ## D18. Scope of this build: benign scenario kept, emulation chain deferred
+
+> **Superseded by D19** for what ships: the Milestone 2 modules and scenario
+> are removed and steps are ART tests. Kept as the record of why the
+> loader/implant chain was never built.
 
 - **Decision:** This milestone ships the facilitator-facing tooling that makes
   an exercise usable, built on the existing Milestone 2 "Persistence via
@@ -254,3 +259,48 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   engine, checklist, answer-key, and hunt framework are already in place; a
   future author would add the modules and the scenario options, not rework the
   plumbing.
+
+## D19. Atomic Red Team is the execution engine (direction change)
+
+- **Decision:** Every attack step is an **Atomic Red Team (ART) test** run by
+  the `Invoke-AtomicRedTeam` module installed on the lab host. This repo
+  contains **orchestration only**: scenarios, the control center, preflight,
+  the ART catalog, verification, cleanup, the detection checklist and the
+  answer key. It contains **no** technique implementations: no new atomics,
+  no custom attack scripts, no technique logic. A scenario step only
+  references an ART test by `auto_generated_guid` (stable across ART updates,
+  unlike test numbers) plus input-argument overrides.
+  - ART root is configurable (default `C:\AtomicRedTeam`). The module is
+    imported by path from `<root>\invoke-atomicredteam\Invoke-AtomicRedTeam.psd1`
+    because it may not be on `$PSModulePath`; atomics are read from
+    `<root>\atomics`.
+  - The catalog is built from the installed atomics with the module's own
+    `Get-AtomicTechnique` when it is exported, otherwise with
+    `ConvertFrom-Yaml` from `powershell-yaml`, filtered to Windows tests.
+  - A step runs as: check prereqs; if missing, show what GetPrereqs would do
+    and require explicit confirmation; execute with a per-run
+    `-ExecutionLogPath`; run the step's declarative, read-only `verify`
+    checks. Cleanup follows D15.
+  - Our earlier technique modules (`stage-script`, `register-scheduled-task`,
+    `run-scheduled-task`) and their scenario are removed. The stub module step
+    type (marker files only) is kept for engine tests.
+  - Guardrails: elevated tests are blocked unless the control center is
+    elevated; tests in destructive/high-impact techniques (T1485, T1486,
+    T1489, T1490, T1529, T1561 and sub-techniques) need a typed confirmation
+    to be added to a scenario; prereqs that download tools need confirmation
+    before GetPrereqs runs; the UI notes that ART paths and command lines
+    (`AtomicRedTeam`, `Invoke-AtomicTest`) may be visible in Falcon telemetry
+    and could tip off trainees (hiding them is out of scope).
+- **Options:** Keep writing our own modules (D11); wrap a different framework
+  (e.g. Caldera); use ART but vendor selected atomics into this repo.
+- **Why:** ART is a maintained, public, widely reviewed library of small
+  technique tests with built-in prereq and cleanup handling. Using it keeps
+  this repo to orchestration and moves the question "what exactly runs" to a
+  public, auditable source installed on the lab host. Vendoring atomics would
+  put attack commands back in this repo and drift from upstream.
+- **Supersedes:** D11 (our own real modules), the module half of D4 for
+  production steps (the module contract now applies to stub test steps only),
+  and the scenario layout in D3 (scenarios are now flat `scenarios/<id>.json`
+  files). D12, D14 and D15 are revised to match. D18's scope note still
+  explains why the loader/implant chain was never built; D19 removes it from
+  the plans altogether.

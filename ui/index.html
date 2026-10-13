@@ -9,24 +9,46 @@
 <body>
   <header class="topbar">
     <h1>TTX Control Center</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab" data-view="exercise" role="tab">Exercise</button>
+      <button class="tab" data-view="catalog" role="tab">ART catalog</button>
+      <button class="tab" data-view="builder" role="tab">Scenario builder</button>
+    </nav>
     <span id="conn" class="conn conn-wait" title="Connection to the local server">connecting...</span>
   </header>
 
   <div id="banner" class="banner" hidden></div>
+  <div class="note note-tipoff">
+    Heads-up: Atomic Red Team command lines and paths (<code>AtomicRedTeam</code>, <code>Invoke-AtomicTest</code>,
+    the atomics folder) may be visible in Falcon telemetry and could tip off trainees. Hiding them is out of scope for now.
+  </div>
 
-  <main class="layout">
-    <aside class="panel" id="scenario-panel">
-      <h2>Scenarios</h2>
-      <ul id="scenario-list" class="scenario-list"></ul>
-      <div id="scenario-detail" hidden>
-        <h3 id="sd-name"></h3>
-        <p id="sd-summary" class="muted"></p>
-        <ul id="sd-objectives" class="objectives"></ul>
-        <form id="sd-form">
-          <div id="sd-params"></div>
-          <button type="submit" class="btn btn-primary">Load scenario</button>
-        </form>
-      </div>
+  <!-- Exercise: load a scenario, run steps, facilitator view -->
+  <main class="layout view" id="view-exercise">
+    <aside class="side">
+      <section class="panel" id="scenario-panel">
+        <h2>Scenarios</h2>
+        <ul id="scenario-list" class="scenario-list"></ul>
+        <div id="scenario-detail" hidden>
+          <h3 id="sd-name"></h3>
+          <p id="sd-summary" class="muted"></p>
+          <ul id="sd-objectives" class="objectives"></ul>
+          <div id="sd-problems"></div>
+          <form id="sd-form">
+            <div id="sd-params"></div>
+            <button type="submit" id="sd-load" class="btn btn-primary">Load scenario</button>
+            <button type="button" id="sd-edit" class="btn">Edit in builder</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="preflight-panel">
+        <div class="panel-head">
+          <h2>Preflight</h2>
+          <button id="btn-preflight" class="btn btn-small">Refresh</button>
+        </div>
+        <div id="preflight"></div>
+      </section>
     </aside>
 
     <section class="panel" id="session-panel">
@@ -39,14 +61,17 @@
               Session <code id="s-id"></code> &middot;
               <span id="s-status" class="pill"></span>
             </div>
-            <div class="meta">Artifact folder: <code id="s-root"></code></div>
-            <div class="meta">Parameters: <span id="s-params"></span></div>
+            <div class="meta" id="s-art"></div>
+            <div class="meta" id="s-params-row">Parameters: <span id="s-params"></span></div>
           </div>
           <div class="actions">
             <button id="btn-run-all" class="btn btn-primary">Run all</button>
             <button id="btn-cleanup" class="btn btn-danger">Cleanup</button>
+            <a id="btn-answer-key" class="btn" href="/api/session/answer-key" target="_blank" rel="noopener">Answer key</a>
           </div>
         </div>
+        <div id="hunt-ready" class="note"></div>
+        <div id="calibration" class="calibration"></div>
         <ol id="steps" class="steps"></ol>
       </div>
     </section>
@@ -57,6 +82,65 @@
     </section>
   </main>
 
+  <!-- ART catalog: browse the installed atomics -->
+  <main class="view" id="view-catalog" hidden>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Atomic Red Team catalog</h2>
+        <button id="btn-rescan" class="btn btn-small">Rescan atomics</button>
+      </div>
+      <div id="catalog-status" class="meta"></div>
+      <div id="catalog-pick-note" class="note" hidden></div>
+      <div class="catalog-filters">
+        <input id="catalog-search" type="search" placeholder="Search technique ID or name, or test name (e.g. T1053.005, scheduled task)" autocomplete="off">
+        <label><input type="checkbox" id="catalog-no-elev"> Hide tests that need elevation</label>
+        <label><input type="checkbox" id="catalog-no-impact"> Hide high-impact</label>
+      </div>
+      <div class="catalog-grid">
+        <div class="catalog-list-wrap">
+          <table class="catalog-table">
+            <thead><tr><th>Technique</th><th>Test</th><th>Executor</th><th>Flags</th></tr></thead>
+            <tbody id="catalog-rows"></tbody>
+          </table>
+          <div id="catalog-more" class="meta"></div>
+        </div>
+        <div id="catalog-detail" class="catalog-detail muted">Select a test to see its details.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Scenario builder -->
+  <main class="view" id="view-builder" hidden>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Scenario builder</h2>
+        <div class="actions">
+          <select id="b-open" aria-label="Open scenario"></select>
+          <button id="b-new" class="btn btn-small">New scenario</button>
+        </div>
+      </div>
+      <p class="meta">
+        A step references one ART test by GUID. Pick tests in the <a href="#" data-goto="catalog">ART catalog</a>,
+        order them, set dependencies and input-argument overrides, and enter what the facilitator should look for.
+        Saved to <code>scenarios/&lt;id&gt;.json</code>.
+      </p>
+      <div class="builder-meta">
+        <label>Id <input id="b-id" placeholder="my-scenario"></label>
+        <label>Name <input id="b-name" placeholder="Scenario name"></label>
+        <label class="wide">Summary <input id="b-summary"></label>
+        <label class="wide">Objectives (one per line) <textarea id="b-objectives" rows="3"></textarea></label>
+      </div>
+      <div id="b-notes" class="meta"></div>
+      <ol id="b-steps" class="steps"></ol>
+      <div class="actions">
+        <button id="b-add" class="btn">Add step from catalog</button>
+        <button id="b-save" class="btn btn-primary">Save scenario</button>
+      </div>
+      <div id="b-result"></div>
+    </section>
+  </main>
+
   <script src="/app.js"></script>
+  <script src="/builder.js"></script>
 </body>
 </html>
