@@ -210,6 +210,9 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 
 ## D17. Falcon preflight and calibration
 
+> **Extended by D22:** preflight now also detects Elastic Agent, Elastic
+> Defend and Sysmon.
+
 - **Decision:** When a session is created, the engine records host, user, UTC
   time, `CSFalconService` status, and the sensor's AID (read from
   `HKLM\SYSTEM\CurrentControlSet\Services\CSAgent\Sim`, value `AG`). If the
@@ -344,4 +347,25 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   lacks one, the existing "not found in the installed atomics" warning says so
   and the step can be re-picked in the builder. Commands still come from ART,
   not this repo (D19).
+
+## D22. EDR-agnostic preflight (Falcon and Elastic)
+
+- **Decision:** Preflight looks for several agents by their Windows service
+  instead of only CrowdStrike: CrowdStrike Falcon (`CSFalconService`, AID
+  from the registry as in D17), Elastic Agent (`Elastic Agent`; agent ID and
+  version from `elastic-agent status --output json`, which needs an elevated
+  console), Elastic Defend (`ElasticEndpoint`) and Sysmon (`Sysmon64` /
+  `Sysmon`). It warns only when no EDR is running (or one is installed but
+  stopped), not when Falcon specifically is missing. Labels in the UI and
+  answer key name the EDR(s) actually running. The answer key adds per-step
+  starter searches for each agent present (Kibana KQL by `host.name` for
+  Elastic, Event Search by AID for Falcon, `Get-WinEvent` for Sysmon), marked
+  "confirm field names in your tenant". The Falcon calibration trigger is
+  shown only when Falcon is installed; there is no equivalent for Elastic
+  (we don't plant test-malware files to trigger it).
+- **Options:** A `-Edr` switch chosen by the facilitator; Falcon-only.
+- **Why:** Lab hosts differ: some run Falcon, some only Elastic. Detecting
+  what is there needs no configuration, and the rest of the tool (checklist,
+  answer key, ready-to-hunt estimate) is already EDR-neutral. Older session
+  files without agent data still read as Falcon-only.
 

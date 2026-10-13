@@ -195,6 +195,39 @@ async function onLoadScenario(ev) {
   }
 }
 
+// ---------- EDR / telemetry agents ----------
+
+// Names of the EDRs running on the host, for labels. Sessions saved before
+// agent detection only know about Falcon.
+function edrLabel(pf) {
+  pf = pf || {};
+  const names = asArray(pf.edrNames).filter(Boolean);
+  if (!names.length && !pf.agents && pf.sensorRunning) return 'CrowdStrike Falcon';
+  return names.length ? names.join(' / ') : 'your EDR';
+}
+
+function agentPresent(pf, id) {
+  pf = pf || {};
+  if (!pf.agents) return id === 'falcon' && !!pf.sensorRunning;
+  return asArray(pf.agents).some(a => a.id === id && a.present);
+}
+
+// One preflight row per agent found; a single warning row when none is.
+function agentRows(pf) {
+  const agents = asArray(pf.agents);
+  const found = agents.filter(a => a.present);
+  if (!found.length) {
+    const looked = agents.map(a => a.name).join(', ') || 'CrowdStrike Falcon, Elastic Agent, Elastic Defend, Sysmon';
+    return [pfRow('EDR / telemetry', `none found (looked for ${looked})`, 'warn')];
+  }
+  return found.map(a => {
+    const bits = [a.status];
+    if (a.version) bits.push(`version ${a.version}`);
+    if (a.idLabel) bits.push(`${a.idLabel} ${a.agentId || 'unknown'}`);
+    return pfRow(a.name, bits.join(', '), a.running ? (a.idLabel && !a.agentId ? 'warn' : 'ok') : 'warn');
+  });
+}
+
 // ---------- preflight ----------
 
 function pfRow(label, value, state) {
@@ -213,8 +246,7 @@ async function loadPreflight() {
       el('table', { class: 'kv' },
         pfRow('Host', pf.host),
         pfRow('User', `${pf.user}${pf.elevated ? ' (elevated)' : ' (not elevated)'}`, pf.elevated ? 'ok' : null),
-        pfRow('Falcon sensor', pf.falconService, pf.sensorRunning ? 'ok' : 'warn'),
-        pfRow('Falcon AID', pf.aid || 'unknown', pf.aid ? 'ok' : 'warn'),
+        agentRows(pf),
         pfRow('ART root', art.root, art.rootFound ? 'ok' : 'bad'),
         pfRow('ART module', art.moduleImportable ? `importable, version ${art.moduleVersion}` : (art.moduleFound ? 'found, not importable' : 'not found'), art.moduleImportable ? 'ok' : 'bad'),
         pfRow('Atomics', art.atomicsFound ? `${art.techniqueCount} technique folder(s)` : 'not found', art.atomicsFound ? 'ok' : 'bad'),
@@ -280,7 +312,7 @@ function renderSession(s) {
   const art = s.art || {};
   fill($('s-art'), 'ART ', el('code', null, art.root || '?'),
     art.version ? ` (version ${art.version})` : '', ' · host ', el('code', null, (s.preflight || {}).host || '?'),
-    ' · AID ', el('code', null, (s.preflight || {}).aid || 'unknown'));
+    agentIdChips(s.preflight || {}));
   const params = s.parameters || {};
   $('s-params-row').hidden = Object.keys(params).length === 0;
   $('s-params').replaceChildren(...Object.keys(params).sort().map(k =>
@@ -292,19 +324,33 @@ function renderSession(s) {
 
   const r = ui.readyToHunt;
   fill($('hunt-ready'), r
-    ? el('span', null, 'Telemetry may take a few minutes to appear in Falcon. Last step finished ',
+    ? el('span', null, `Telemetry may take a few minutes to appear in ${edrLabel(s.preflight)}. Last step finished `,
       el('strong', null, fmtUtc(r.lastStepEndUtc)), '; ready to hunt at about ',
       el('strong', null, fmtUtc(r.readyAtUtc)), ` (${fmtTime(r.readyAtUtc)} local, ~${r.delayMinutes} min after).`)
-    : 'Telemetry may take a few minutes to appear in Falcon after each step.');
+    : `Telemetry may take a few minutes to appear in ${edrLabel(s.preflight)} after each step.`);
 
   renderCalibration(s, active);
   const steps = asArray(s.steps);
   $('steps').replaceChildren(...steps.map((st, i) => renderStep(st, i, active)));
 }
 
+// " · Elastic Agent ID … · AID …" for the agents whose ID is known.
+function agentIdChips(pf) {
+  const out = [' · EDR: ', edrLabel(pf)];
+  for (const a of asArray(pf.agents)) {
+    if (a.present && a.idLabel) out.push(` · ${a.idLabel} `, el('code', null, a.agentId || 'unknown'));
+  }
+  if (!pf.agents && pf.aid) out.push(' · AID ', el('code', null, pf.aid));
+  return out;
+}
+
 function renderCalibration(s, active) {
   const c = s.calibration;
   const box = $('calibration');
+  // The calibration trigger is CrowdStrike-specific; offer it only when Falcon
+  // is on the host (or a calibration was already recorded).
+  box.hidden = !c && !agentPresent(s.preflight, 'falcon');
+  if (box.hidden) return;
   const runBtn = el('button', {
     class: 'btn btn-small', disabled: !active,
     onclick: () => post('/api/session/calibrate', {}, 'Run the CrowdStrike test-detection trigger (choice.exe /m crowdstrike_sample_detection) on this host?'),
@@ -450,7 +496,7 @@ function renderChecklist(st, ex) {
     },
   }, 'Add');
   return el('div', { class: 'checklist' },
-    el('h4', null, 'Detections in Falcon (expected vs. actual)'),
+    el('h4', null, `Detections in ${edrLabel((ui.session || {}).preflight)} (expected vs. actual)`),
     rows.length ? el('table', { class: 'detections' }, el('tbody', null, rows.map(r => {
       const sel = el('select', { onchange: (e) => save(r.id, e.target.value, notes.value) },
         ['unknown', 'fired', 'not-fired'].map(v => el('option', { value: v, selected: r.result === v }, v)));
