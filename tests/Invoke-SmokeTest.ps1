@@ -229,16 +229,20 @@ try {
 
     # ---- Guardrails: elevation, failing test, missing GUID ----
     $view = New-TtxSession -ScenarioId 'smoke-art-guards'
-    $e = Get-CaughtError { Start-TtxStep -StepId 'elev-1' }
+    $e = Get-CaughtError { Start-TtxStep -StepId 'missing-1' }
+    Check ($e -is [System.InvalidOperationException] -and $e.Message -like '*not found in the installed atomics*') 'step with an uninstalled GUID refused'
     if ($view.session.preflight.elevated) {
-        Write-Host '     (running elevated: elevation block not exercised)'
+        # Elevated console: the elevated fixture test is allowed and runs (it only echoes).
+        Write-Host '     (running elevated: checking the elevated test runs instead of being blocked)'
+        Start-TtxStep -StepId 'elev-1' | Out-Null
+        Wait-Idle
+        Check ((Get-Step 'elev-1').status -eq 'succeeded') 'elevated test runs when the control center is elevated'
     }
     else {
+        $e = Get-CaughtError { Start-TtxStep -StepId 'elev-1' }
         Check ($e -is [System.InvalidOperationException] -and $e.Message -like '*requires elevation*') 'elevated test blocked when the control center is not elevated'
         Check ((Get-CaughtError { Start-TtxRunAll }) -like '*Run all refused*') 'run all refused up front when a step is blocked'
     }
-    $e = Get-CaughtError { Start-TtxStep -StepId 'missing-1' }
-    Check ($e -is [System.InvalidOperationException] -and $e.Message -like '*not found in the installed atomics*') 'step with an uninstalled GUID refused'
     Start-TtxStep -StepId 'fail-1' | Out-Null
     Wait-Idle
     $f1 = Get-Step 'fail-1'
@@ -246,7 +250,7 @@ try {
     Start-TtxCleanup | Out-Null
     Wait-Idle
     $g = (Get-TtxSessionView).session
-    Check ($g.status -eq 'cleaned' -and (Get-Step 'elev-1').cleanup.status -eq 'skipped') 'cleanup skips steps that never ran'
+    Check ($g.status -eq 'cleaned' -and (Get-Step 'missing-1').cleanup.status -eq 'skipped') 'cleanup skips steps that never ran'
 
     # ---- Stub module steps (engine test step type) ----
     $e = Get-CaughtError { New-TtxSession -ScenarioId 'smoke-stub' -Parameters @{ ArtifactFolder = '..\Windows' } }
