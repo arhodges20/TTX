@@ -1,4 +1,9 @@
-# Module contract
+# Module contract (stub modules, tests only)
+
+> **Since D19, attack steps are Atomic Red Team tests**, not modules. This
+> contract now applies only to the **stub** modules in `modules/stub-*`,
+> which write and remove marker files so the engine can be tested without
+> ART. Do not add technique modules here.
 
 A **module** implements one kind of exercise step. A scenario step names the
 module it uses; the engine runs the module in a background job (a separate

@@ -1030,7 +1030,7 @@ function Complete-TtxCleanup {
     }
     if ($s.artifactRoot) { Remove-TtxEmptyArtifactFolders }
     if (@($s.steps | Where-Object { $_.prereqsFetched }).Count -gt 0) {
-        Add-TtxEvent -Level warn -Message 'Note: files fetched by GetPrereqs are not removed by ART cleanup (usually under the atomics ExternalPayloads folder).'
+        Add-TtxEvent -Level warn -Message 'Note: files fetched by GetPrereqs are not removed by ART cleanup (usually <ART root>\ExternalPayloads).'
     }
     $s.status = 'cleaned'
     Add-TtxEvent -Message 'Cleanup complete; session closed.'
