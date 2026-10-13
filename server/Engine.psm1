@@ -248,7 +248,7 @@ function Initialize-TtxCatalog {
 function Get-TtxCatalogStatus {
     $c = $script:Ttx.Catalog
     $m = $c.meta
-    return @{
+    $st = @{
         status         = $c.status
         error          = $c.error
         stale          = $c.stale
@@ -260,8 +260,11 @@ function Get-TtxCatalogStatus {
         artVersion     = if ($m) { $m.artVersion } else { $null }
         count          = if ($m) { $m.count } else { 0 }
         techniqueCount = if ($m) { $m.techniqueCount } else { 0 }
-        parseErrors    = if ($m) { @(@($m.errors) | Select-Object -First 20) } else { @() }
+        parseErrors    = @()
     }
+    # Assigned separately: an @() inside an if-expression would unroll to $null.
+    if ($m) { $st.parseErrors = @(@($m.errors | Where-Object { $_ }) | Select-Object -First 20) }
+    return $st
 }
 
 # The catalog list for the UI as a JSON string (built once per load; the full
@@ -1354,7 +1357,9 @@ function Get-TtxSessionView {
     $extras = @{}
     if ($script:Ttx.Session -and -not $unchanged) {
         foreach ($step in $script:Ttx.Session.steps) {
-            $blockedBy = @(Get-TtxUnmetDependencies -Step $step | ForEach-Object { @{ id = $_.id; title = $_.title; status = $_.status } })
+            # Not piped: the function returns its list as one object.
+            $unmet = Get-TtxUnmetDependencies -Step $step
+            $blockedBy = @(foreach ($d in $unmet) { @{ id = $d.id; title = $d.title; status = $d.status } })
             $extras[$step.id] = @{
                 detections = (Get-TtxStepDetectionRows -Step $step)
                 blockedBy  = $blockedBy

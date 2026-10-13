@@ -53,8 +53,8 @@ function Get-TtxPreflight {
     $art = Get-TtxArtStatus -ArtRoot (Resolve-TtxArtRoot $ArtRoot)
     $warnings += @($art.warnings)
     return @{
-        host          = [string]$env:COMPUTERNAME
-        user          = "$env:USERDOMAIN\$env:USERNAME"
+        host          = $(if ($env:COMPUTERNAME) { [string]$env:COMPUTERNAME } else { [Environment]::MachineName })
+        user          = $(if ($env:USERNAME) { "$env:USERDOMAIN\$env:USERNAME" } else { [Environment]::UserName })
         elevated      = $elevated
         checkedAtUtc  = (Get-Date).ToUniversalTime().ToString('o')
         falconService = $serviceStatus
