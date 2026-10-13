@@ -19,10 +19,10 @@ step has a Cleanup whose result is verified.
 **Milestone 1, control center shell:** done and tested on the lab host
 (Windows Server 2022, PowerShell 5.1).
 
-**Milestone 2, real artifacts:** built; awaiting lab-host testing.
+**Milestone 2, real artifacts:** done and tested on the lab host.
 
-- The "Persistence via scheduled task" scenario now creates real, benign artifacts:
-  1. **Stage script:** writes `C:\ProgramData\<ArtifactFolder>\<SessionId>\updater.ps1`.
+- The "Persistence via scheduled task" scenario creates real, benign artifacts:
+  1. **Stage script:** writes `C:\ProgramData\<ArtifactFolder>\updater.ps1`.
      When run, the script only appends one line (time, user, computer) to
      `updater.log` beside it.
   2. **Register task:** registers a real scheduled task `\TTX-Lab-Updater`
@@ -33,13 +33,38 @@ step has a Cleanup whose result is verified.
      launches powershell.exe, the script runs, and the step waits for
      `updater.log`.
 - Each step shows "Artifacts on host" (paths, task name, exact command line)
-  and the PID of the powershell.exe it ran in.
+  and the PID of the powershell.exe it ran in. Steps 2 and 3 declare
+  `dependsOn`, so they can't run before the step they need has succeeded.
 - `ArtifactFolder`, `ScriptName`, and `TaskName` can be changed when loading
   the scenario, so each exercise can use different names.
 - Cleanup unregisters the task and deletes the files. It never touches a
   same-named task that this session didn't create.
 - **Note:** until Cleanup runs, the task fires on its own at every logon of
   that user. The only effect is another line in `updater.log`.
+
+**Milestone 3, facilitator tooling:** backend built and tested; **no UI yet**.
+These are reachable via the API and the generated answer-key file today; the
+web UI that surfaces them is not built.
+
+- **Falcon preflight:** at session load the engine records host, user,
+  elevation, UTC time, `CSFalconService` status and the sensor AID. It warns
+  but never blocks, and nothing requires an EDR to be present.
+- **Calibration check:** an endpoint runs CrowdStrike's benign test-detection
+  trigger so you can confirm the console is generating detections before the
+  exercise. (Command and AID location are marked "confirm in your tenant" —
+  see decisions D17.)
+- **Expected-vs-actual detection checklist:** each module lists the detections
+  it is *likely* to trigger; the facilitator records which actually fired. The
+  tool never promises a detection — Falcon's logic is proprietary (D13).
+- **Answer key:** `runs/<id>/answer-key.md` is generated from the run's real
+  values (host, AID, task name, paths, UTC window) with per-step process
+  lineage, expected Falcon events, Windows-side evidence, starter queries, the
+  trainee pivot path, and the detection checklist. Refreshed after every step.
+
+> **Scope note:** a louder attacker-emulation chain (loader/implant, encoded
+> persistence, intensity profiles) was designed (decisions D12-D15) but
+> deliberately **not built**; see D18. The shipped scenario stays benign while
+> still producing genuine, huntable telemetry.
 
 ## Requirements
 
@@ -101,6 +126,28 @@ modules/                  Step modules (one folder per module; _common = shared 
 scenarios/                Scenarios (one folder per scenario, scenario.json)
 tests/                    Syntax check and engine smoke test
 runs/                     Session state and logs (gitignored)
+```
+
+## Facilitator API (Milestone 3, no UI yet)
+
+While the server is running, these endpoints back the facilitator features.
+POSTs need the header `X-TTX-Request: 1` (the web UI sends it automatically).
+
+| Method / path | Purpose |
+|---|---|
+| `GET /api/preflight` | Host, user, elevation, UTC time, Falcon sensor status and AID. |
+| `GET /api/session/answer-key` | The generated `answer-key.md` for the current run (Markdown). |
+| `POST /api/session/calibrate` | Run the Falcon calibration trigger. |
+| `POST /api/session/calibration` | Body `{ "result": "fired\|not-fired\|unknown", "notes": "" }`. |
+| `POST /api/session/steps/<id>/detections` | Body `{ "detectionId": "...", "result": "fired\|not-fired\|unknown", "notes": "" }`. |
+
+The answer key is also written to `runs\<SessionId>\answer-key.md` and refreshed
+after every step and every checklist change — open it directly, no server
+needed. Example, from PowerShell on the lab host:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/preflight
+Get-Content .\runs\<SessionId>\answer-key.md
 ```
 
 ## How to test on the lab host
