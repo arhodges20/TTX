@@ -118,3 +118,88 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   in CrowdStrike Falcon. Marker files don't produce the events analysts would
   look for (task registration, task-launched processes). Fake log entries
   wouldn't appear in the EDR at all.
+
+## D12. Scheduled-task scenario: loader/implant chain in four steps
+
+- **Decision:** The scenario models a post-initial-access chain with two inert
+  stand-in scripts: a *loader* (only appends a UTC timestamp to a marker file)
+  and an *implant* (only checks in and creates the scheduled task). Four
+  modules: stage foothold files, implant execution, implant creates
+  persistence, persistence fires. Steps 2 and 3 stay **separate**: each step
+  launches a fresh implant process (`svcmgr.ps1 checkin` / `svcmgr.ps1
+  persist`). In step 3 the implant script itself starts `schtasks.exe` (or
+  calls `Register-ScheduledTask` in cmdlet mode), so schtasks is necessarily
+  its child. The implant records its own PID, its parent PID, the schtasks
+  PID, and exit code; step 3's Verify requires the recorded schtasks parent
+  PID to equal the implant PID. Task settings are written into the implant
+  file at staging time, so its command line stays a plain `-File`.
+- **Options:** Merge steps 2 and 3 into one implant run; a long-lived implant
+  that waits for a "go" signal between steps.
+- **Why:** Keeps each step independently runnable (as requested) while
+  guaranteeing the `powershell.exe (implant) -> schtasks.exe` lineage, and
+  proves it with recorded PIDs instead of assuming it. A waiting implant would
+  be orphaned by a control-center restart and need extra cleanup. The TTX job
+  process remains the implant's parent; the answer key leaves "how did the
+  implant get here?" as the open question for the next exercise.
+
+## D13. Detections are likely, not guaranteed
+
+- **Decision:** Each module lists the detections it is *likely* to trigger
+  (tactic/technique level, "confirm in your tenant"). The facilitator marks
+  which actually fired in a per-step checklist; results are saved to session
+  state and the run's answer key so scenarios can be tuned over time.
+- **Why:** CrowdStrike Falcon's detection logic (IOAs, ML) is proprietary and
+  changes over time, and depends on the tenant's prevention policy. The tool
+  can stack well-known suspicious indicators but cannot promise a detection.
+  Expected-vs-actual records turn that uncertainty into data.
+
+## D14. DetectionProfile drives the individual options
+
+- **Decision:** `DetectionProfile` (`loud` default, `subtle`) supplies
+  defaults for `CreateMethod`, `EncodeCommand`, and `HiddenWindow`. An option
+  the admin sets explicitly when loading the scenario always wins; options
+  left unset take the profile's value. The GUI pre-fills the fields when the
+  profile changes, and keeps later edits.
+  - `loud`: hidden, encoded PowerShell (`-nop -w hidden -ep bypass -enc`),
+    `schtasks.exe /create` from the implant, `schtasks /run`.
+  - `subtle`: `Register-ScheduledTask` (no schtasks.exe), plain `-File`, no
+    hidden window, `Start-ScheduledTask`.
+- **Why:** One switch for the common case, without taking control away from
+  the admin.
+
+## D15. Task ownership proven from session state
+
+- **Decision:** `schtasks /create` cannot set a task description, so the task
+  isn't tagged that way. Instead: Run refuses to create a task whose name
+  already exists; Cleanup deletes the task only if session state records that
+  this run created it **and** its action still references this run's loader.
+  The run ID is also embedded (as a comment) in the encoded command and in
+  both stand-in files, so a SOC can confirm the task is benign.
+- **Why:** Keeps the realistic `schtasks.exe /create /tr ...` command line
+  while guaranteeing Cleanup never deletes a task it didn't create.
+
+## D16. Artifact folder without a per-session subfolder (supersedes D8)
+
+- **Decision:** Files go directly in `%ProgramData%\<ArtifactFolder>` (default
+  `TTX-Lab`; `%ProgramData%\TTX-Lab` is accepted too). Every file carries the
+  run ID; Run refuses to overwrite a same-named file that lacks this run's ID.
+- **Options:** Keep `<ArtifactFolder>\<SessionId>\` (D8).
+- **Why:** Matches the requested layout, keeps paths realistic, and keeps the
+  task action under schtasks' 261-character `/tr` limit. Safe because only one
+  session can be active and the previous one must be cleaned up first.
+
+## D17. Falcon preflight and calibration
+
+- **Decision:** When a session is created, the engine records host, user, UTC
+  time, `CSFalconService` status, and the sensor's AID (read from
+  `HKLM\SYSTEM\CurrentControlSet\Services\CSAgent\Sim`, value `AG`). If the
+  sensor isn't running the GUI warns; nothing is blocked. An optional
+  calibration action runs CrowdStrike's benign test-detection trigger,
+  `choice /m crowdstrike_sample_detection`, with `/t 5 /d Y` added so it can
+  never wait for input.
+- **Caveat:** The trigger command and AID location could not be verified
+  against current CrowdStrike documentation from the development environment
+  (it requires a support-portal login); confirm both in your tenant's docs.
+  The `/t 5 /d Y` flags are our addition.
+- **Why:** Proves the sensor and console generate detections before the
+  exercise, using behavior only: no test files, hashes, or sensor tampering.

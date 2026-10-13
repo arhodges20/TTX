@@ -20,5 +20,17 @@ Until the brief is added, work follows these constraints from the project owner:
   task that runs a placeholder script which only writes a log/marker file).
   No functional malware, payloads, injection, credential access, or anything
   harmful outside a lab.
-- **Every step has a working Cleanup.**
+- **Every step has a working Cleanup**, driven from recorded session state,
+  so it still works after a control-center restart.
+- **Stand-in files are labelled.** Every stand-in file starts with a comment
+  identifying it as a TTX training artifact and includes the run ID, so a SOC
+  can always confirm it is benign.
+- **Standard user by default.** Any option that needs admin checks for
+  elevation and fails clearly.
+- **Detection is a requirement, not a side effect.** Behavior stays benign,
+  but steps use attacker-shaped tradecraft so the EDR's behavioral logic is
+  likely to raise a detection (the lab host runs a detect-only policy).
+  Detection must come from behavior, never from planted malware signatures,
+  hashes, EICAR-style files, or anything that tampers with or evades the
+  sensor. The EDR does not have to be present for the tool to run.
 - **Start super simple.** Do not build anything the brief lists as out of scope.
