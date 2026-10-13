@@ -1,5 +1,6 @@
-# Host and EDR sensor preflight. Windows PowerShell 5.1.
-# Dot-sourced by Engine.psm1. Nothing here blocks an exercise: it only reports.
+# Host, EDR sensor and Atomic Red Team preflight. Windows PowerShell 5.1.
+# Dot-sourced by Engine.psm1 (after Art.ps1). Nothing here blocks an exercise:
+# it only reports. (ART steps themselves refuse to run without ART.)
 
 # The CrowdStrike Falcon sensor's agent ID (AID) is stored as binary value 'AG'
 # under this key. Confirm against your CrowdStrike documentation (D17).
@@ -30,6 +31,7 @@ function Get-TtxFalconAid {
 }
 
 function Get-TtxPreflight {
+    param([string]$ArtRoot)
     $warnings = @()
     $serviceStatus = 'not found'
     if (Get-Command -Name Get-Service -ErrorAction SilentlyContinue) {
@@ -48,6 +50,8 @@ function Get-TtxPreflight {
         $warnings += 'Could not read the Falcon AID from the registry (try an elevated console). Queries will need the AID filled in by hand.'
     }
     $elevated = Test-TtxIsElevated
+    $art = Get-TtxArtStatus -ArtRoot (Resolve-TtxArtRoot $ArtRoot)
+    $warnings += @($art.warnings)
     return @{
         host          = [string]$env:COMPUTERNAME
         user          = "$env:USERDOMAIN\$env:USERNAME"
@@ -56,6 +60,7 @@ function Get-TtxPreflight {
         falconService = $serviceStatus
         sensorRunning = $running
         aid           = $aid
+        art           = $art
         warnings      = $warnings
     }
 }
