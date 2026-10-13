@@ -21,6 +21,7 @@ fine; the control center validates the file on every load.
 | `summary` | no | One or two sentences shown in the UI. |
 | `objectives` | no | Array of strings (what trainees should find). |
 | `notes` | no | Array of strings for whoever edits the scenario. |
+| `continue_on_failure` | no | `true` = sessions start with **Continue past failed steps** on (D20). Default `false`. The facilitator can change it per session. |
 | `parameters`, `profileParameter`, `profiles` | no | Scenario-wide options with profile defaults (see below). Not used by ART steps; kept for stub tests and future scenario-wide settings. |
 | `steps` | yes | Ordered array of steps. |
 
@@ -49,7 +50,7 @@ fine; the control center validates the file on every load.
 | `technique` | yes* | ATT&CK id (`T1234` or `T1234.001`). Set from the chosen test; if it disagrees with the test's technique, the test's wins and a warning is shown. |
 | `atomic_guid` | yes* | The ART test's `auto_generated_guid` (stable across ART updates, unlike test numbers). Empty = draft: the scenario can be saved but not loaded. A GUID not found in the installed atomics is a warning; that step can't run. |
 | `input_arguments` | no | Overrides for the atomic's input arguments (strings). Arguments not set use the atomic's defaults; names the atomic doesn't define are ignored (warning). |
-| `depends_on` | no | Earlier step ids that must have **succeeded** before this step runs. Enforced: running too early is refused with a warning, never silently skipped. |
+| `depends_on` | no | Earlier step ids that must have **succeeded** before this step runs (or, with Continue past failed steps on, have been **attempted**: succeeded, failed or stopped at missing prereqs). Enforced: running too early is refused with a warning, never silently skipped. |
 | `verify` | no | Read-only checks run after the step (below). |
 | `expected_detections` | no | Strings the facilitator expects to see in Falcon. They become the step's detection checklist rows (`exp-1`, `exp-2`, ...). |
 | `hunt_notes` | no | Strings shown to the facilitator and in the answer key. `{{Host}}`, `{{Aid}}`, `{{SessionId}}` and `{{<input argument>}}` are filled in. |

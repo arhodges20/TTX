@@ -12,8 +12,12 @@
   --code-bg: #eef0f4;
 }
 
+:root { color-scheme: light; }
+
+/* Dark theme: follows the OS unless the user picked Light or Dark (data-theme
+   on <html>, set by the theme switcher and remembered in localStorage). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #14171c;
     --panel: #1c2027;
     --text: #e4e7ec;
@@ -25,7 +29,22 @@
     --warn: #e0b341;
     --run: #5b8def;
     --code-bg: #262b34;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --panel: #1c2027;
+  --text: #e4e7ec;
+  --muted: #98a1b2;
+  --border: #2e3440;
+  --primary: #5b8def;
+  --danger: #f0605a;
+  --ok: #4cc26b;
+  --warn: #e0b341;
+  --run: #5b8def;
+  --code-bg: #262b34;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -243,3 +262,9 @@ textarea { width: 100%; resize: vertical; }
 .b-step { border-left-color: var(--primary); }
 .deps { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 #view-builder .actions { margin-top: 8px; flex-wrap: wrap; }
+
+/* ---- theme switcher, session options ---- */
+.theme-pick { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-right: 10px; }
+.theme-pick select { padding: 2px 4px; font-size: 12px; }
+.topbar-right { display: flex; align-items: center; }
+.session-option { font-size: 13px; margin: 4px 0 0; }

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "id": "smoke-art-continue",
+  "name": "Smoke test continue past failures (mock ART)",
+  "summary": "Test fixture: a failing step followed by a step that depends on it.",
+  "continue_on_failure": true,
+  "steps": [
+    {
+      "id": "fail-1",
+      "title": "Fails on purpose (fixture)",
+      "technique": "T9999.001",
+      "atomic_guid": "55555555-5555-4555-8555-555555555555"
+    },
+    {
+      "id": "after-1",
+      "title": "Echo after the failure (fixture)",
+      "technique": "T9999.001",
+      "atomic_guid": "22222222-2222-4222-8222-222222222222",
+      "depends_on": [ "fail-1" ]
+    }
+  ]
+}

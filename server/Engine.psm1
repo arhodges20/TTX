@@ -437,6 +437,7 @@ function Test-TtxScenario {
     $steps = @($Scenario.steps | Where-Object { $null -ne $_ })
     if ($steps.Count -eq 0) { $incomplete += 'The scenario has no steps yet.' }
     $catalogReady = ($script:Ttx.Catalog.status -eq 'ready')
+    if ($null -ne $Scenario.continue_on_failure -and $Scenario.continue_on_failure -isnot [bool]) { $errors += 'continue_on_failure must be true or false.' }
     $seen = @{}
     foreach ($step in $steps) {
         if ($step -isnot [hashtable]) { $errors += 'Each step must be an object.'; continue }
@@ -624,6 +625,7 @@ function ConvertTo-TtxCleanScenario {
         objectives    = Get-TtxStringList $Scenario.objectives
     }
     if ($Scenario.notes) { $clean.notes = Get-TtxStringList $Scenario.notes }
+    if ($Scenario.continue_on_failure -eq $true) { $clean.continue_on_failure = $true }
     if ($Scenario.parameters) { $clean.parameters = @($Scenario.parameters) }
     if ($Scenario.profileParameter) { $clean.profileParameter = [string]$Scenario.profileParameter; $clean.profiles = $Scenario.profiles }
     $clean.steps = $steps
@@ -729,13 +731,18 @@ function Invoke-TtxDescribe {
     }
 }
 
-# Steps this step depends on that haven't succeeded.
+# Steps this step depends on that aren't done yet. Normally a dependency must
+# have succeeded. With "continue past failed steps" on, it only has to have
+# been attempted (succeeded, failed, or stopped at missing prereqs): order is
+# still kept, but one failure doesn't block the rest of the scenario.
 function Get-TtxUnmetDependencies {
     param([hashtable]$Step)
+    $done = @('succeeded')
+    if ($script:Ttx.Session.continueOnFailure) { $done = @('succeeded', 'failed', 'prereqs-missing') }
     $missing = @()
     foreach ($dep in @($Step.dependsOn)) {
         $d = Get-TtxStep -StepId $dep
-        if ($d -and $d.status -ne 'succeeded') { $missing += , $d }
+        if ($d -and $done -notcontains $d.status) { $missing += , $d }
     }
     return , $missing
 }
@@ -904,7 +911,7 @@ function Complete-TtxModuleJob {
         else {
             $Step.status = 'failed'
             Add-TtxEvent -StepId $Step.id -Level error -Message "Failed: $($Result.error)"
-            Clear-TtxRunQueue -Reason "Stopped after '$($Step.id)' failed."
+            Stop-TtxRunAfterFailure -Step $Step -Why "'$($Step.id)' failed."
         }
     }
     else {
@@ -935,7 +942,7 @@ function Complete-TtxArtJob {
                 $Step.error = $null
                 $what = if ($Step.atomic.prereqDownloads) { ' Some prereqs download files from the internet.' } else { '' }
                 Add-TtxEvent -StepId $Step.id -Level warn -Message "Prerequisites not met: $(@($Result.prereqs.missing) -join '; '). Review what GetPrereqs would do and confirm it to continue.$what"
-                Clear-TtxRunQueue -Reason "Stopped at '$($Step.id)': prerequisites are missing."
+                Stop-TtxRunAfterFailure -Step $Step -Why "'$($Step.id)' stopped: prerequisites are missing."
                 return
             }
             if ($Result.run -is [hashtable]) {
@@ -964,7 +971,7 @@ function Complete-TtxArtJob {
             else {
                 $Step.status = 'failed'
                 Add-TtxEvent -StepId $Step.id -Level error -Message "Failed: $($Result.error)"
-                Clear-TtxRunQueue -Reason "Stopped after '$($Step.id)' failed."
+                Stop-TtxRunAfterFailure -Step $Step -Why "'$($Step.id)' failed."
             }
         }
         'getprereqs' {
@@ -1004,6 +1011,19 @@ function Complete-TtxArtJob {
             }
         }
     }
+}
+
+# After a step fails (or stops at missing prereqs) during a run: stop the
+# queued steps, unless the session continues past failures.
+function Stop-TtxRunAfterFailure {
+    param([hashtable]$Step, [string]$Why)
+    if ($script:Ttx.Session.continueOnFailure) {
+        if (@($script:Ttx.Queue | Where-Object { $_.op -eq 'run' }).Count -gt 0) {
+            Add-TtxEvent -StepId $Step.id -Level warn -Message "$Why Continuing with the next step (continue past failed steps is on)."
+        }
+        return
+    }
+    Clear-TtxRunQueue -Reason "Stopped: $Why"
 }
 
 # Drops queued 'run' items (e.g. Run all after a failure) and resets their steps.
@@ -1301,6 +1321,9 @@ function New-TtxSession {
         }
         preflight       = $preflight
         calibration     = $null
+        # Run all keeps going after a failed step, and dependencies only need
+        # to have been attempted. Defaults from the scenario; toggled in the UI.
+        continueOnFailure = ($scenario.continue_on_failure -eq $true)
         steps           = @()
     }
     $session.steps = @(foreach ($st in @($scenario.steps | Where-Object { $null -ne $_ })) {
@@ -1538,6 +1561,18 @@ function Invoke-TtxCalibration {
     return (Get-TtxSessionView)
 }
 
+# Session options the facilitator can change while the session is active.
+function Set-TtxSessionOptions {
+    param([bool]$ContinueOnFailure)
+    $s = $script:Ttx.Session
+    if (-not $s -or $s.status -ne 'active') { throw (New-TtxConflict 'No active session.') }
+    $s.continueOnFailure = $ContinueOnFailure
+    $state = if ($ContinueOnFailure) { 'on: Run all keeps going after a failed step, and dependencies only need to have been attempted' } else { 'off: Run all stops at the first failure, and dependencies must succeed' }
+    Add-TtxEvent -Message "Continue past failed steps is $state."
+    Save-TtxSession
+    return (Get-TtxSessionView)
+}
+
 function Set-TtxCalibrationResult {
     param([string]$Result, [string]$Notes)
     $s = $script:Ttx.Session
@@ -1722,6 +1757,7 @@ function Write-TtxAnswerKey {
     [void]$sb.AppendLine("| User | ``$($v.User)`` (elevated: $($pf.elevated)) |")
     [void]$sb.AppendLine("| Falcon AID | ``$($v.Aid)`` |")
     [void]$sb.AppendLine("| Sensor | $($pf.falconService) |")
+    [void]$sb.AppendLine("| Continue past failed steps | $(if ($s.continueOnFailure) { 'on' } else { 'off' }) |")
     if ($s.art) {
         $ver = if ($s.art.version) { $s.art.version } else { 'unknown' }
         [void]$sb.AppendLine("| Atomic Red Team | $ver at ``$($s.art.root)`` |")
@@ -1914,5 +1950,5 @@ Export-ModuleMember -Function Initialize-TtxEngine, Get-TtxScenarioList, Get-Ttx
     Get-TtxPreflight, Invoke-TtxCalibration, Set-TtxCalibrationResult,
     Set-TtxDetectionResult, Get-TtxAnswerKey,
     Get-TtxCatalogStatus, Get-TtxCatalogJson, Get-TtxCatalogTest, Get-TtxAtomicPreview, Start-TtxCatalogBuild,
-    Test-TtxCatalogBuilding, Get-TtxHostPreflight,
+    Test-TtxCatalogBuilding, Get-TtxHostPreflight, Set-TtxSessionOptions,
     ConvertFrom-TtxJson, ConvertTo-TtxJson

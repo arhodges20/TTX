@@ -324,6 +324,9 @@ const Builder = {
       inp.value = d[key] || '';
       inp.oninput = () => { d[key] = inp.value; };
     }
+    const cont = $('b-continue');
+    cont.checked = d.continue_on_failure === true;
+    cont.onchange = () => { if (cont.checked) d.continue_on_failure = true; else delete d.continue_on_failure; };
     const obj = $('b-objectives');
     obj.value = asArray(d.objectives).join('\n');
     obj.oninput = () => { d.objectives = linesOf(obj.value); };

@@ -139,6 +139,10 @@ function Invoke-TtxRequest {
                 Send-TtxJson $res (Get-TtxAtomicPreview -Guid ([string]$body.guid) -InputArguments $ia)
                 return
             }
+            if ($path -eq '/api/session/options') {
+                Send-TtxJson $res (Set-TtxSessionOptions -ContinueOnFailure ($body.continueOnFailure -eq $true))
+                return
+            }
             if ($path -eq '/api/session/run-all') {
                 Send-TtxJson $res (Start-TtxRunAll)
                 return

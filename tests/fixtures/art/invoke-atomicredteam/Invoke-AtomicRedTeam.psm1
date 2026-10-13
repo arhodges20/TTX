@@ -50,6 +50,17 @@ function Get-AtomicTechnique {
     }
 }
 
+# Like ART's Get-TargetInfo: is this session elevated? TTX_MOCK_ART_ELEVATED=1
+# forces it on for tests.
+function Test-MockElevated {
+    if ($env:TTX_MOCK_ART_ELEVATED -eq '1') { return $true }
+    try {
+        $p = New-Object System.Security.Principal.WindowsPrincipal ([System.Security.Principal.WindowsIdentity]::GetCurrent())
+        return $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch { return $false }
+}
+
 function Invoke-MockCommand {
     param([string]$Command, [int]$TimeoutSeconds)
     $exe = if ($PSVersionTable.PSEdition -eq 'Core') { (Get-Process -Id $PID).Path } else { 'powershell.exe' }
@@ -101,7 +112,7 @@ function Invoke-AtomicTest {
         if ($CheckPrereqs) {
             Write-Host "CheckPrereq's for: $testId"
             $reasons = @()
-            if ($test.executor.elevation_required -and $env:TTX_MOCK_ART_ELEVATED -ne '1') { $reasons += "Elevation required but not provided`n" }
+            if ($test.executor.elevation_required -and -not (Test-MockElevated)) { $reasons += "Elevation required but not provided`n" }
             foreach ($dep in @($test.dependencies)) {
                 $res = Invoke-MockCommand (Merge-MockArgs $dep.prereq_command $test $InputArgs $PathToAtomicsFolder) $TimeoutSeconds
                 if ($res.ExitCode -ne 0) { $reasons += (Merge-MockArgs $dep.description $test $InputArgs $PathToAtomicsFolder) }
