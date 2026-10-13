@@ -4,6 +4,11 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Docs
+- README, brief, scenario format and stub module contract rewritten shorter
+  and brought up to date (ART, Elastic/Falcon, built-in scenarios). API table
+  moved to `docs/api.md`; decisions get a status index.
+
 ### EDR-agnostic preflight (Elastic as well as CrowdStrike)
 
 #### Added
