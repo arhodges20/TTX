@@ -1337,7 +1337,9 @@ function New-TtxSession {
     Save-TtxSession
     Add-TtxEvent -Message "Session $sessionId created for scenario '$($scenario.name)'."
     $pf = $session.preflight
-    Add-TtxEvent -Message "Preflight: host $($pf.host), user $($pf.user), elevated $($pf.elevated), Falcon sensor $($pf.falconService), AID $(if ($pf.aid) { $pf.aid } else { 'unknown' })."
+    $agentText = (@($pf.agents | Where-Object { $_.present } | ForEach-Object { "$($_.name) $($_.status)$(if ($_.agentId) { " ($($_.idLabel) $($_.agentId))" })" }) -join ', ')
+    if (-not $agentText) { $agentText = 'no EDR or telemetry agent found' }
+    Add-TtxEvent -Message "Preflight: host $($pf.host), user $($pf.user), elevated $($pf.elevated); $agentText."
     $artMsg = if ($pf.art.moduleImportable) { "ART $($pf.art.moduleVersion) at $($pf.art.root)" } else { "ART not usable at $($pf.art.root)" }
     Add-TtxEvent -Message "Preflight: $artMsg; $($pf.art.techniqueCount) technique folder(s); powershell-yaml $(if ($pf.art.yamlAvailable) { $pf.art.yamlVersion } else { 'missing' })."
     foreach ($w in @($pf.warnings)) { Add-TtxEvent -Level warn -Message $w }
@@ -1557,7 +1559,7 @@ function Invoke-TtxCalibration {
     try { $cal = Start-TtxFalconCalibration }
     catch { throw (New-TtxConflict "Could not start the calibration trigger: $($_.Exception.Message)") }
     $s.calibration = $cal
-    Add-TtxEvent -Message "Calibration: started '$($cal.commandLine)' (PID $($cal.pid)). Check Falcon for a test detection in a few minutes, then mark the result."
+    Add-TtxEvent -Message "Calibration: started '$($cal.commandLine)' (PID $($cal.pid)). Check CrowdStrike Falcon for a test detection in a few minutes, then mark the result."
     Save-TtxSession
     return (Get-TtxSessionView)
 }
@@ -1685,6 +1687,22 @@ function Expand-TtxPlaceholders {
     return $out
 }
 
+# The EDR(s) running on the host, for labels ("appear in Elastic Agent").
+# Sessions saved before agent detection only know about Falcon.
+function Get-TtxEdrLabel {
+    param($Preflight)
+    $names = @($Preflight.edrNames | Where-Object { $_ })
+    if ($names.Count -eq 0 -and $null -eq $Preflight.agents -and $Preflight.sensorRunning) { $names = @('CrowdStrike Falcon') }
+    if ($names.Count -eq 0) { return 'your EDR' }
+    return ($names -join ' / ')
+}
+
+# Is this agent installed on the host (from the session's preflight)?
+function Test-TtxAgentPresent {
+    param($Preflight, [string]$Id)
+    return (@($Preflight.agents | Where-Object { $_.id -eq $Id -and $_.present }).Count -gt 0)
+}
+
 # Values available to hunt notes and the answer key for this run.
 function Get-TtxRunValues {
     $s = $script:Ttx.Session
@@ -1693,6 +1711,8 @@ function Get-TtxRunValues {
         Host      = [string]$pf.host
         User      = [string]$pf.user
         Aid       = if ($pf.aid) { [string]$pf.aid } else { '<AID unknown>' }
+        ElasticAgentId = if ($pf.elasticAgentId) { [string]$pf.elasticAgentId } else { '<Elastic Agent ID unknown>' }
+        Edr       = (Get-TtxEdrLabel -Preflight $pf)
         SessionId = [string]$s.sessionId
     }
     foreach ($key in @($s.parameters.Keys)) { $values[$key] = [string]$s.parameters[$key] }
@@ -1729,6 +1749,32 @@ function Get-TtxReadyToHunt {
     }
 }
 
+# Host-scoped starter searches for the facilitator, one set per agent present.
+# Elastic: KQL on this host's process events (host.name may be stored in lower
+# case, so both spellings are matched). Falcon: Event Search by AID.
+function Get-TtxStarterSearches {
+    param([hashtable]$Step, [hashtable]$Values, $Preflight)
+    $out = @()
+    $hostName = [string]$Values.Host
+    $image = $null
+    if ($Step.atomic -and $Step.atomic.executor -eq 'powershell') { $image = 'powershell.exe' }
+    elseif ($Step.atomic -and $Step.atomic.executor -eq 'command_prompt') { $image = 'cmd.exe' }
+    if ((Test-TtxAgentPresent $Preflight 'elastic-agent') -or (Test-TtxAgentPresent $Preflight 'elastic-defend')) {
+        $hostQ = 'host.name : ("{0}" or "{1}")' -f $hostName, $hostName.ToLowerInvariant()
+        $out += , @{ label = 'Elastic (Kibana KQL), process starts on the host'; query = ('{0} and event.category : "process" and event.type : "start"' -f $hostQ) }
+        if ($image) { $out += , @{ label = "Elastic (Kibana KQL), processes started by the ART executor ($image)"; query = ('{0} and process.parent.name : "{1}"' -f $hostQ, $image) } }
+    }
+    if ((Test-TtxAgentPresent $Preflight 'falcon') -or ($null -eq $Preflight.agents -and $Preflight.aid)) {
+        $out += , @{ label = 'CrowdStrike Falcon (Event Search), process starts on the host'; query = "aid=$($Values.Aid) event_simpleName=ProcessRollup2" }
+    }
+    if (Test-TtxAgentPresent $Preflight 'sysmon') {
+        $start = [string]$Step.run.startUtc
+        $end = if ($Step.run.endUtc) { [string]$Step.run.endUtc } else { $start }
+        $out += , @{ label = 'Sysmon on the host (PowerShell), process creation in the window'; query = ("Get-WinEvent -FilterHashtable @{{LogName='Microsoft-Windows-Sysmon/Operational'; Id=1; StartTime=[datetime]'{0}'; EndTime=[datetime]'{1}'}}" -f $start, $end) }
+    }
+    return , $out
+}
+
 function Get-TtxMdCell {
     param([string]$Text)
     if ($null -eq $Text) { return '' }
@@ -1756,8 +1802,19 @@ function Write-TtxAnswerKey {
     [void]$sb.AppendLine("| Session | ``$($s.sessionId)`` ($($s.status)) |")
     [void]$sb.AppendLine("| Host | ``$($v.Host)`` |")
     [void]$sb.AppendLine("| User | ``$($v.User)`` (elevated: $($pf.elevated)) |")
-    [void]$sb.AppendLine("| Falcon AID | ``$($v.Aid)`` |")
-    [void]$sb.AppendLine("| Sensor | $($pf.falconService) |")
+    $present = @($pf.agents | Where-Object { $_.present })
+    if ($null -eq $pf.agents) {
+        [void]$sb.AppendLine("| Falcon AID | ``$($v.Aid)`` |")
+        [void]$sb.AppendLine("| Sensor | $($pf.falconService) |")
+    }
+    elseif ($present.Count -eq 0) {
+        [void]$sb.AppendLine('| EDR / telemetry | none detected |')
+    }
+    foreach ($a in $present) {
+        $idText = if ($a.agentId) { " - $($a.idLabel) ``$($a.agentId)``" } elseif ($a.idLabel) { " - $($a.idLabel) unknown" } else { '' }
+        $verText = if ($a.version) { " $($a.version)" } else { '' }
+        [void]$sb.AppendLine("| $($a.name)$verText | $($a.status)$idText |")
+    }
     [void]$sb.AppendLine("| Continue past failed steps | $(if ($s.continueOnFailure) { 'on' } else { 'off' }) |")
     if ($s.art) {
         $ver = if ($s.art.version) { $s.art.version } else { 'unknown' }
@@ -1770,7 +1827,7 @@ function Write-TtxAnswerKey {
         [void]$sb.AppendLine("| Ready to hunt (estimate, UTC) | $($ready.readyAtUtc) |")
     }
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("> Telemetry may take a few minutes to appear in Falcon. The ready-to-hunt time assumes about $($script:Ttx.TelemetryDelayMin) minutes after the last step.")
+    [void]$sb.AppendLine("> Telemetry may take a few minutes to appear in $($v.Edr). The ready-to-hunt time assumes about $($script:Ttx.TelemetryDelayMin) minutes after the last step.")
     [void]$sb.AppendLine()
     if ($s.calibration) {
         [void]$sb.AppendLine("Calibration: ``$($s.calibration.commandLine)`` at $($s.calibration.ranAtUtc) -> result **$($s.calibration.result)**.")
@@ -1865,6 +1922,20 @@ function Write-TtxAnswerKey {
             [void]$sb.AppendLine()
         }
 
+        if ($step.run -and $step.run.startUtc) {
+            $searches = Get-TtxStarterSearches -Step $step -Values $v -Preflight $pf
+            if ($searches.Count -gt 0) {
+                [void]$sb.AppendLine('Starter searches (set the time range to the UTC window above; confirm field names in your tenant):')
+                foreach ($q in $searches) {
+                    [void]$sb.AppendLine("- $($q.label):")
+                    [void]$sb.AppendLine('  ```')
+                    [void]$sb.AppendLine("  $($q.query)")
+                    [void]$sb.AppendLine('  ```')
+                }
+                [void]$sb.AppendLine()
+            }
+        }
+
         $notes = Get-TtxExpandedHuntNotes -Step $step
         if (@($notes).Count -gt 0) {
             [void]$sb.AppendLine('Hunt notes:')
@@ -1890,7 +1961,7 @@ function Write-TtxAnswerKey {
     }
 
     [void]$sb.AppendLine('---')
-    [void]$sb.AppendLine("_Telemetry may take a few minutes to appear in Falcon. ART command lines and paths (AtomicRedTeam, Invoke-AtomicTest) may be visible to trainees in telemetry. Generated $((Get-Date).ToUniversalTime().ToString('o'))._")
+    [void]$sb.AppendLine("_Telemetry may take a few minutes to appear in $($v.Edr). ART command lines and paths (AtomicRedTeam, Invoke-AtomicTest) may be visible to trainees in telemetry. Generated $((Get-Date).ToUniversalTime().ToString('o'))._")
 
     Write-TtxTextFile -Path (Join-Path (Get-TtxSessionDir) 'answer-key.md') -Text ($sb.ToString())
 }

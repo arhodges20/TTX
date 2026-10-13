@@ -4,6 +4,21 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### EDR-agnostic preflight (Elastic as well as CrowdStrike)
+
+#### Added
+- Preflight detects **CrowdStrike Falcon**, **Elastic Agent** (agent ID and
+  version via `elastic-agent status`), **Elastic Defend** and **Sysmon**,
+  each with its service status (D22). Warns only when no EDR is running.
+- Answer key: per-step starter searches for each agent present (Kibana KQL,
+  Falcon Event Search, Sysmon `Get-WinEvent`).
+- Hunt-note placeholders `{{Edr}}` and `{{ElasticAgentId}}`.
+
+#### Changed
+- UI and answer-key labels name the EDR actually running ("Detections in
+  Elastic Agent", "appear in Elastic Agent") instead of always "Falcon".
+- The Falcon calibration row only shows when Falcon is installed.
+
 ### Fixed
 - Scenario warnings said "the ART catalog isn't loaded" while the catalog was
   still being built on first start, and stayed until the page was reloaded.

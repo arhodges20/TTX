@@ -268,3 +268,4 @@ textarea { width: 100%; resize: vertical; }
 .theme-pick select { padding: 2px 4px; font-size: 12px; }
 .topbar-right { display: flex; align-items: center; }
 .session-option { font-size: 13px; margin: 4px 0 0; }
+.calibration[hidden] { display: none; }

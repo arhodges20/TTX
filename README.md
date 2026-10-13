@@ -2,8 +2,8 @@
 
 A local tool for running **technical tabletop exercises (TTX)** on a Windows
 lab host. Each scenario step runs an **Atomic Red Team (ART)** test that is
-installed on the host. Analysts hunt the resulting telemetry in CrowdStrike
-Falcon, CTF-style. The facilitator drives the steps from this tool. For each
+installed on the host. Analysts hunt the resulting telemetry in their EDR
+(CrowdStrike Falcon or Elastic), CTF-style. The facilitator drives the steps from this tool. For each
 step the tool shows the atomic's description, the exact command that ran, the
 UTC window, verify results, and the facilitator's hunt notes. Afterwards it
 generates an answer key and runs ART cleanup.
@@ -69,8 +69,16 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
 
 ## Using it
 
-1. **Exercise → Preflight**: check that Falcon sensor, AID, ART root, ART
-   module (and version), atomics, and powershell-yaml are all green.
+1. **Exercise → Preflight**: check that ART root, ART module (and version),
+   atomics, and powershell-yaml are green, and that your EDR shows as
+   `Running`. Preflight looks for **CrowdStrike Falcon** (service
+   `CSFalconService`, with its AID), **Elastic Agent** (service
+   `Elastic Agent`, with its agent ID and version from
+   `elastic-agent status`; needs an elevated console), **Elastic Defend**
+   (`ElasticEndpoint`) and **Sysmon** (`Sysmon64`/`Sysmon`). Labels in the
+   UI and answer key follow whatever is running ("appear in Elastic Agent",
+   "Detections in Elastic Agent"). The Falcon calibration button only shows
+   when Falcon is installed.
 2. **ART catalog**: browse the installed Windows tests and search by
    technique ID or name (e.g. `T1053.005`, `scheduled task`). Each test shows
    its GUID, platforms, executor, `elevation_required`, input arguments with
@@ -97,8 +105,11 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
      `-ExecutionLogPath` (`runs\<id>\art-execution-log.csv`);
    - records the UTC window, exit code and output, then runs the verify
      checks.
-5. **Hunt**: telemetry may take a few minutes to appear in Falcon; the
-   session header shows a ready-to-hunt estimate. Mark which expected
+5. **Hunt**: telemetry may take a few minutes to appear in your EDR; the
+   session header shows a ready-to-hunt estimate. The answer key has
+   starter searches per step for each agent found: Kibana KQL for Elastic
+   (`host.name` plus process events), Event Search for Falcon (by AID),
+   and a `Get-WinEvent` line for Sysmon. Mark which expected
    detections fired in each step's checklist. **Answer key** opens
    `runs\<id>\answer-key.md`.
 6. **Cleanup** runs `Invoke-AtomicTest ... -Cleanup` for every step that ran,
@@ -107,8 +118,12 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
    step's cleanup.
 
 > **Trainee tip-off:** ART command lines and paths (`AtomicRedTeam`,
-> `Invoke-AtomicTest`, the atomics folder) may be visible in Falcon
-> telemetry. Hiding them is out of scope for now.
+> `Invoke-AtomicTest`, the atomics folder) may be visible in EDR
+> telemetry (Falcon or Elastic). Hiding them is out of scope for now.
+
+**Hunt-note placeholders:** `{{Host}}`, `{{Edr}}`, `{{Aid}}` (Falcon),
+`{{ElasticAgentId}}`, `{{SessionId}}` and any of the step's input arguments,
+e.g. `{{task_command}}`.
 
 **Theme:** the Theme picker in the top bar switches between System (follows
 Windows), Light and Dark; the choice is remembered in the browser.
@@ -176,7 +191,7 @@ POSTs need the header `X-TTX-Request: 1` (the web UI sends it).
 
 | Method / path | Purpose |
 |---|---|
-| `GET /api/preflight` | Host, user, elevation, Falcon sensor and AID, ART status. |
+| `GET /api/preflight` | Host, user, elevation, EDR/telemetry agents (Falcon, Elastic Agent, Elastic Defend, Sysmon) with IDs, ART status. |
 | `GET /api/catalog` | Catalog status and the test list (summary). |
 | `GET /api/catalog/tests/<guid>` | One test in full. |
 | `POST /api/catalog/preview` | `{ guid, input_arguments }` → command, cleanup and prereq commands after substitution. |
@@ -194,8 +209,8 @@ POSTs need the header `X-TTX-Request: 1` (the web UI sends it).
 
 ## Testing on the lab host
 
-Run these from Windows PowerShell 5.1 on the lab host, with the Falcon sensor
-running.
+Run these from Windows PowerShell 5.1 on the lab host, with its EDR (Falcon
+or Elastic Agent) running.
 
 **0. Get the code.** Download the branch ZIP and extract it to a fresh folder
 (e.g. `C:\TTX3`), then run `Get-ChildItem -Recurse | Unblock-File` in that
@@ -226,8 +241,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-ControlCenter.ps
 ```
 
 In **Preflight**, check that ART root, ART module (with its version), atomics
-and powershell-yaml are green, and that the Falcon sensor is `Running` with
-an AID. Open **ART catalog**. The first build takes about a minute. Expect
+and powershell-yaml are green, and that your EDR is `Running` with its ID
+(Falcon AID or Elastic Agent ID; run elevated to read them). Open **ART catalog**. The first build takes about a minute. Expect
 over a thousand Windows tests, and check that searching `T1053.005` lists the
 scheduled-task tests.
 
@@ -248,8 +263,10 @@ result. Load the scenario and click **Run all**.
 | `runs\<id>\art-execution-log.csv` | One row per executed test, with `ExitCode`. |
 | Answer key | Host, AID, scenario, and per step: technique, test, GUID, command, UTC window, verify results, hunt notes. |
 
-**6. Check Falcon.** After the ready-to-hunt time shown in the session
-header, search Falcon for the host's AID within each step's UTC window. You
+**6. Check your EDR.** After the ready-to-hunt time shown in the session
+header, use the answer key's starter searches: in Kibana, the KQL for this
+host with the time picker set to each step's UTC window; in Falcon, Event
+Search by the host's AID. You
 should find the PowerShell activity and the scheduled-task creation. Mark
 each expected detection as fired or not-fired in its step's checklist, and
 add any unexpected ones. Confirm the answer key shows your marks. Note
@@ -290,7 +307,7 @@ count, any rows that didn't match, and what Falcon detected.
 This repo is developed in a Linux cloud environment and checked with
 PowerShell 7:
 - `tests/Test-Syntax.ps1`.
-- `tests/Invoke-SmokeTest.ps1` against the mock ART (82 checks).
+- `tests/Invoke-SmokeTest.ps1` against the mock ART (90 checks).
 - PSScriptAnalyzer's `PSUseCompatibleSyntax`, `PSUseCompatibleCommands` and
   `PSUseCompatibleTypes` rules targeting Windows PowerShell 5.1.
 - A headless-browser walkthrough of the UI against a running server.

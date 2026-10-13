@@ -227,7 +227,7 @@ try {
 
     $keyPath = Join-Path (Join-Path (Join-Path $work 'runs') $sid) 'answer-key.md'
     $key = if (Test-Path -LiteralPath $keyPath) { Get-Content -LiteralPath $keyPath -Raw } else { '' }
-    Check ($key -like '*Host*' -and $key -like '*Falcon AID*' -and $key -like '*Smoke test (mock ART)*') 'answer key: host, AID, scenario'
+    Check ($key -like '*Host*' -and $key -like '*| EDR / telemetry | none detected |*' -and $key -like '*Smoke test (mock ART)*') 'answer key: host, EDR (none on this host), scenario'
     Check ($key -like '*T9999.001*Write marker file*' -and $key -like '*11111111-1111-4111-8111-111111111111*') 'answer key: technique, test name, GUID'
     Check ($key -like '*Command that ran*smoke-marker.txt*' -and $key -like '*UTC window*') 'answer key: command that ran and UTC window'
     Check ($key -like '*file_exists*pass*' -and $key -like '*Marker file smoke-marker.txt*') 'answer key: verify results and hunt notes'
@@ -285,6 +285,36 @@ try {
     Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'continue on: cleanup closes the session'
     $key = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $work 'runs') $sid) 'answer-key.md') -Raw
     Check ($key -like '*Continue past failed steps | on*') 'answer key records the continue setting'
+
+    # ---- EDR-agnostic preflight: Elastic Agent + Sysmon, no Falcon ----
+    # Fake the Windows services so the engine sees Elastic Agent and Sysmon
+    # running (a global function shadows the Get-Service cmdlet).
+    function global:Get-Service {
+        param([string]$Name)
+        if ($Name -in 'Elastic Agent', 'Sysmon64') { return [pscustomobject]@{ Name = $Name; Status = 'Running' } }
+        return $null
+    }
+    try {
+        $view = New-TtxSession -ScenarioId 'smoke-art'
+        $pf = $view.session.preflight
+        $ea = @($pf.agents | Where-Object { $_.id -eq 'elastic-agent' })[0]
+        Check ($ea.present -and $ea.running -and @($pf.edrNames) -contains 'Elastic Agent') 'preflight detects a running Elastic Agent'
+        Check (@($pf.agents | Where-Object { $_.id -eq 'falcon' -and -not $_.present }).Count -eq 1) 'preflight reports Falcon as not installed'
+        Check (@($pf.warnings | Where-Object { $_ -like 'No EDR agent is running*' }).Count -eq 0) 'no "no EDR" warning when Elastic is running'
+        Check (@($pf.warnings | Where-Object { $_ -like '*Elastic Agent ID*' }).Count -eq 1) 'warns when the Elastic Agent ID cannot be read'
+        Start-TtxStep -StepId 'echo-1' | Out-Null
+        Wait-Idle
+        $key = (Get-TtxAnswerKey).markdown
+        Check ($key -like '*| Elastic Agent | Running*' -and $key -like '*| Sysmon | Running*' -and $key -notlike '*Falcon AID*') 'answer key lists Elastic Agent and Sysmon, not a Falcon AID'
+        Check ($key -like '*host.name : (*' -and $key -like '*process.parent.name : "powershell.exe"*' -and $key -like '*Sysmon/Operational*') 'answer key has Elastic KQL and Sysmon starter searches'
+        Check ($key -like '*appear in Elastic Agent*' -and $key -notlike '*CrowdStrike Falcon (Event Search)*') 'telemetry note names Elastic; no Falcon search without Falcon'
+        Start-TtxCleanup | Out-Null
+        Wait-Idle
+    }
+    finally {
+        Remove-Item -Path Function:\Get-Service -ErrorAction SilentlyContinue
+    }
+    Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'Elastic session cleaned up'
 
     # ---- Stub module steps (engine test step type) ----
     $e = Get-CaughtError { New-TtxSession -ScenarioId 'smoke-stub' -Parameters @{ ArtifactFolder = '..\Windows' } }

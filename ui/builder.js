@@ -376,7 +376,7 @@ const Builder = {
       el('div', { class: 'b-grid' },
         el('label', { class: 'wide' }, 'Expected detections (one per line)',
           this.bind(el('textarea', { rows: 3 }, asArray(st.expected_detections).join('\n')), st, 'expected_detections', linesOf)),
-        el('label', { class: 'wide' }, 'Hunt notes (one per line; {{Host}}, {{Aid}}, {{<input arg>}} are filled in)',
+        el('label', { class: 'wide' }, 'Hunt notes (one per line; {{Host}}, {{Edr}}, {{Aid}}, {{ElasticAgentId}}, {{<input arg>}} are filled in)',
           this.bind(el('textarea', { rows: 3 }, asArray(st.hunt_notes).join('\n')), st, 'hunt_notes', linesOf))),
       el('div', { class: 'actions' }, el('button', { class: 'btn btn-small', onclick: () => this.preview(st, previewBox) }, 'Preview command with these inputs')),
       previewBox);
