@@ -526,6 +526,12 @@ async function poll() {
     setConn('ok');
     applyView(view, since === 0);
     if (window.Catalog) window.Catalog.onStatus(ui.catalog);
+    // Scenario checks depend on the catalog (are the GUIDs installed?), so
+    // re-read the scenario list whenever a catalog build finishes.
+    const cat = ui.catalog || {};
+    const catKey = `${cat.status}|${cat.builtAtUtc}`;
+    if (ui.catalogKey !== undefined && catKey !== ui.catalogKey && cat.status !== 'building') loadScenarios().catch(() => {});
+    ui.catalogKey = catKey;
   } catch (e) {
     setConn('bad');
   } finally {

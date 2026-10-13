@@ -491,7 +491,8 @@ function Test-TtxScenario {
             $test = Get-TtxCatalogTest -Guid $guid
             if (-not $test) {
                 if ($catalogReady) { $warnings += "Step '$sid': test $guid was not found in the installed atomics ($($script:Ttx.ArtRoot)). It can't run until it is." }
-                else { $warnings += "Step '$sid': the ART catalog isn't loaded, so test $guid can't be checked yet." }
+                elseif ($script:Ttx.Catalog.status -eq 'building') { $warnings += "Step '$sid': the ART catalog is still being built (a minute or two on first start), so test $guid can't be checked yet. This clears by itself when the build finishes." }
+                else { $warnings += "Step '$sid': the ART catalog isn't available ($($script:Ttx.Catalog.error)), so test $guid can't be checked." }
             }
             else {
                 if ($tech -and $tech -ne $test.techniqueId) { $warnings += "Step '$sid' says technique $tech but test $guid belongs to $($test.techniqueId); $($test.techniqueId) is used." }
