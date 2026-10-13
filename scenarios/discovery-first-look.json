@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "id": "discovery-first-look",
+  "name": "Discovery: first look around the host",
+  "summary": "Read-only discovery an intruder typically runs right after landing on a host: who am I, what is this machine, what is on the network, who else has accounts here. Nothing is created or changed.",
+  "objectives": [
+    "Find the burst of discovery commands and the process that launched them.",
+    "List which ATT&CK discovery techniques were used, in order.",
+    "Explain why a short burst of built-in tools from one parent is suspicious."
+  ],
+  "continue_on_failure": true,
+  "steps": [
+    {
+      "id": "user-1",
+      "title": "Current user and privileges (whoami /all)",
+      "tactic": "Discovery",
+      "technique": "T1033",
+      "atomic_guid": "aab580c7-cc30-4a7c-b5a9-46a29066b022",
+      "input_arguments": {},
+      "depends_on": [],
+      "verify": [],
+      "expected_detections": [ "whoami.exe with /all from a script host or shell" ],
+      "hunt_notes": [ "Start from whoami.exe on {{Host}} in this step's UTC window; its parent is the start of the discovery burst." ]
+    },
+    {
+      "id": "host-1",
+      "title": "System information (systeminfo)",
+      "tactic": "Discovery",
+      "technique": "T1082",
+      "atomic_guid": "66703791-c902-4560-8770-42b8a91f7667",
+      "input_arguments": {},
+      "depends_on": [ "user-1" ],
+      "verify": [],
+      "expected_detections": [ "systeminfo.exe executed shortly after other discovery" ],
+      "hunt_notes": [ "systeminfo.exe and reg.exe query from the same parent as whoami.exe." ]
+    },
+    {
+      "id": "net-1",
+      "title": "Network configuration (ipconfig, arp, nbtstat, net config)",
+      "tactic": "Discovery",
+      "technique": "T1016",
+      "atomic_guid": "970ab6a1-0157-4f3f-9a73-ec4166754b23",
+      "input_arguments": {},
+      "depends_on": [ "host-1" ],
+      "verify": [],
+      "expected_detections": [ "Several network discovery tools run in quick succession" ],
+      "hunt_notes": [ "ipconfig.exe, netsh.exe, arp.exe, nbtstat.exe and net.exe within seconds of each other." ]
+    },
+    {
+      "id": "proc-1",
+      "title": "Running processes (tasklist)",
+      "tactic": "Discovery",
+      "technique": "T1057",
+      "atomic_guid": "c5806a4f-62b8-4900-980b-c7ec004e9908",
+      "input_arguments": {},
+      "depends_on": [ "net-1" ],
+      "verify": [],
+      "expected_detections": [],
+      "hunt_notes": [ "tasklist.exe: often used to look for security tools." ]
+    },
+    {
+      "id": "acct-1",
+      "title": "Local accounts (net user, cmdkey /list)",
+      "tactic": "Discovery",
+      "technique": "T1087.001",
+      "atomic_guid": "80887bec-5a9b-4efc-a81d-f83eb2eb32ab",
+      "input_arguments": {},
+      "depends_on": [ "proc-1" ],
+      "verify": [],
+      "expected_detections": [ "Local account enumeration with net.exe" ],
+      "hunt_notes": [ "net.exe user, cmdkey.exe /list (stored credentials) and a dir of C:\\Users." ]
+    },
+    {
+      "id": "group-1",
+      "title": "Local groups and administrators (net localgroup)",
+      "tactic": "Discovery",
+      "technique": "T1069.001",
+      "atomic_guid": "1f454dd6-e134-44df-bebb-67de70fb6cd8",
+      "input_arguments": {},
+      "depends_on": [ "acct-1" ],
+      "verify": [],
+      "expected_detections": [ "Enumeration of the local Administrators group" ],
+      "hunt_notes": [ "net.exe localgroup \"Administrators\": who could the intruder target for privilege escalation?" ]
+    },
+    {
+      "id": "conn-1",
+      "title": "Network connections and sessions (netstat, net use)",
+      "tactic": "Discovery",
+      "technique": "T1049",
+      "atomic_guid": "0940a971-809a-48f1-9c4d-b1d785e96ee5",
+      "input_arguments": {},
+      "depends_on": [ "group-1" ],
+      "verify": [],
+      "expected_detections": [],
+      "hunt_notes": [ "netstat.exe -ano, net use, net sessions." ]
+    },
+    {
+      "id": "share-1",
+      "title": "Network shares on this host (net view)",
+      "tactic": "Discovery",
+      "technique": "T1135",
+      "atomic_guid": "20f1097d-81c1-405c-8380-32174d493bbb",
+      "input_arguments": {},
+      "depends_on": [ "conn-1" ],
+      "verify": [],
+      "expected_detections": [],
+      "hunt_notes": [ "net.exe view \\\\localhost closes the burst. Build the full timeline from whoami.exe to here." ]
+    }
+  ]
+}

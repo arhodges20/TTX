@@ -120,10 +120,17 @@ try {
 
     # ---- Scenarios: listing, validation, builder save, guardrails ----
     $list = Get-TtxScenarioList
-    $ex = @($list | Where-Object { $_.id -eq 'persistence-schtask' })[0]
-    Check ($null -ne $ex -and $ex.valid -and -not $ex.loadable) 'example scenario is valid but not loadable until GUIDs are chosen'
-    Check (@($ex.incomplete | Where-Object { $_ -like '*atomic_guid*' }).Count -eq 2 -and @($ex.incomplete | Where-Object { $_ -like '*placeholder*' }).Count -eq 1) 'example scenario reports missing GUIDs and the verify placeholder'
-    Check ((Get-CaughtError { New-TtxSession -ScenarioId 'persistence-schtask' }) -is [System.ArgumentException]) 'loading the example before choosing tests is refused'
+    $builtIn = 'discovery-first-look', 'persistence-schtask', 'persistence-run-key', 'collection-staging'
+    foreach ($id in $builtIn) {
+        $b = @($list | Where-Object { $_.id -eq $id })[0]
+        Check ($null -ne $b -and $b.valid -and $b.loadable -and @($b.incomplete).Count -eq 0) "built-in scenario '$id' is valid and ready to load"
+    }
+    $draftIncomplete = @{ id = 'draft-incomplete'; name = 'Draft'; steps = @(
+            @{ id = 'a'; title = 'A'; technique = 'T1059.001'; atomic_guid = '' },
+            @{ id = 'b'; title = 'B'; technique = 'T9999.001'; atomic_guid = '22222222-2222-4222-8222-222222222222'; verify = @(@{ type = 'scheduled_task_exists'; name = '<task name>' }) }) }
+    $d = Save-TtxScenario -Scenario $draftIncomplete -Overwrite $false
+    Check ($d.saved -and @($d.incomplete | Where-Object { $_ -like '*atomic_guid*' }).Count -eq 1 -and @($d.incomplete | Where-Object { $_ -like '*placeholder*' }).Count -eq 1) 'draft with no GUID and a verify placeholder saves but is reported incomplete'
+    Check ((Get-CaughtError { New-TtxSession -ScenarioId 'draft-incomplete' }) -is [System.ArgumentException]) 'loading an incomplete draft is refused'
     $smoke = @($list | Where-Object { $_.id -eq 'smoke-art' })[0]
     Check ($smoke.loadable) 'smoke-art scenario is loadable'
     $guards = @($list | Where-Object { $_.id -eq 'smoke-art-guards' })[0]
