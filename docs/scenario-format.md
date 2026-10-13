@@ -1,109 +1,75 @@
 # Scenario format (schemaVersion 2)
 
-A scenario is one JSON file, `scenarios/<id>.json`; the file name must equal
-the scenario `id`. It is an ordered chain of steps that the facilitator runs
-all at once or one step at a time. Each attack step references one
-**Atomic Red Team test** by its `auto_generated_guid` (decision D19); the
-command that runs comes from the atomics installed on the lab host, never
-from this repo.
+One JSON file per scenario: `scenarios/<id>.json` (file name = `id`). Usually
+written by the Scenario builder; hand edits are validated on load.
 
-Scenarios are normally created and edited in the **Scenario builder** tab,
-which picks tests from the ART catalog and writes this format. Hand edits are
-fine; the control center validates the file on every load.
+## Scenario
 
-## Top-level fields
-
-| Field | Required | Meaning |
+| Field | Req. | Meaning |
 |---|---|---|
-| `schemaVersion` | yes | `2`. |
+| `schemaVersion` | yes | `2` |
 | `id` | yes | Letters, digits, `-`, `_`; equals the file name. |
 | `name` | yes | Display name. |
-| `summary` | no | One or two sentences shown in the UI. |
-| `objectives` | no | Array of strings (what trainees should find). |
-| `notes` | no | Array of strings for whoever edits the scenario. |
-| `continue_on_failure` | no | `true` = sessions start with **Continue past failed steps** on (D20). Default `false`. The facilitator can change it per session. |
-| `parameters`, `profileParameter`, `profiles` | no | Scenario-wide options with profile defaults (see below). Not used by ART steps; kept for stub tests and future scenario-wide settings. |
-| `steps` | yes | Ordered array of steps. |
+| `summary`, `objectives`, `notes` | no | Text shown in the UI. |
+| `continue_on_failure` | no | `true` = sessions start with Continue past failed steps on (D20). |
+| `parameters`, `profileParameter`, `profiles` | no | Scenario-wide options (used by stub tests; D14). |
+| `steps` | yes | Ordered steps. |
 
 ## ART step
 
 ```json
 {
   "id": "persist-1",
-  "title": "Persistence via scheduled task",
+  "title": "Scheduled task created with schtasks.exe",
   "tactic": "Persistence",
   "technique": "T1053.005",
-  "atomic_guid": "<chosen from the catalog>",
-  "input_arguments": { "task_name": "TTX-Updater" },
+  "atomic_guid": "42f53695-ad4a-4546-abb6-7d837f644a71",
+  "input_arguments": { "time": "06:00" },
   "depends_on": ["exec-1"],
-  "verify": [ { "type": "scheduled_task_exists", "name": "#{task_name}" } ],
-  "expected_detections": [ "Scheduled task created by powershell.exe" ],
-  "hunt_notes": [ "Pivot from the task registration on {{Host}} to its action." ]
+  "verify": [ { "type": "scheduled_task_exists", "name": "spawn" } ],
+  "expected_detections": [ "schtasks.exe /create from a command shell" ],
+  "hunt_notes": [ "Task action {{task_command}} on {{Host}}." ]
 }
 ```
 
-| Field | Required | Meaning |
-|---|---|---|
-| `id` | yes | Unique within the scenario. |
-| `title` | yes | Display title. |
-| `tactic` | no | ATT&CK tactic label, for the facilitator. |
-| `technique` | yes* | ATT&CK id (`T1234` or `T1234.001`). Set from the chosen test; if it disagrees with the test's technique, the test's wins and a warning is shown. |
-| `atomic_guid` | yes* | The ART test's `auto_generated_guid` (stable across ART updates, unlike test numbers). Empty = draft: the scenario can be saved but not loaded. A GUID not found in the installed atomics is a warning; that step can't run. |
-| `input_arguments` | no | Overrides for the atomic's input arguments (strings). Arguments not set use the atomic's defaults; names the atomic doesn't define are ignored (warning). |
-| `depends_on` | no | Earlier step ids that must have **succeeded** before this step runs (or, with Continue past failed steps on, have been **attempted**: succeeded, failed or stopped at missing prereqs). Enforced: running too early is refused with a warning, never silently skipped. |
-| `verify` | no | Read-only checks run after the step (below). |
-| `expected_detections` | no | Strings the facilitator expects to see in Falcon. They become the step's detection checklist rows (`exp-1`, `exp-2`, ...). |
-| `hunt_notes` | no | Strings shown to the facilitator and in the answer key. `{{Host}}`, `{{Aid}}`, `{{SessionId}}` and `{{<input argument>}}` are filled in. |
-| `high_impact_confirmation` | when required | For destructive/high-impact techniques (T1485, T1486, T1489, T1490, T1529, T1561 and their sub-techniques) this must equal the technique id. The builder sets it after the facilitator types the id; without it the scenario can't be saved or loaded. |
-
-\* A step needs a `technique` or an `atomic_guid` that resolves to one.
+| Field | Meaning |
+|---|---|
+| `atomic_guid` | The ART test's `auto_generated_guid`. Empty = draft (saves, won't load). Not installed = warning; that step can't run. |
+| `technique` | ATT&CK id. If it disagrees with the test's, the test's wins (warning). |
+| `input_arguments` | Overrides; unset arguments use the atomic's defaults. |
+| `depends_on` | Earlier steps that must have succeeded (or, with Continue past failed steps, been attempted). |
+| `verify` | Read-only checks after the run (below). |
+| `expected_detections` | Rows of the step's detection checklist. |
+| `hunt_notes` | Shown to the facilitator and in the answer key. Placeholders: `{{Host}}`, `{{Edr}}`, `{{Aid}}`, `{{ElasticAgentId}}`, `{{SessionId}}`, `{{<input argument>}}`. |
+| `high_impact_confirmation` | Required for T1485, T1486, T1489, T1490, T1529, T1561 (and sub-techniques): must equal the technique id. |
 
 ## Verify checks
 
-Declarative and read-only. They supplement ART's exit status by confirming the
-step left the artifact the facilitator expects. Each result is **pass**,
-**fail** or **unknown** (the check couldn't tell on this host). Values may use
-`#{input_argument}`, `%VAR%` and `$env:VAR`.
+Read-only; result is pass, fail or unknown. Values may use `#{arg}`, `%VAR%`,
+`$env:VAR`.
 
-| `type` | Fields | Passes when |
-|---|---|---|
-| `file_exists` | `path` | The file or folder exists. |
-| `scheduled_task_exists` | `name` (`\Folder\Name` or `Name`), optional `path` | `Get-ScheduledTask` finds the task. |
-| `registry_value_exists` | `key` (`HKCU\...`, `HKLM\...`, `HKEY_...`), optional `name` | The key (or the named value) exists. |
-| `service_exists` | `name` | `Get-Service` finds the service. |
-| `process_ran_since_step_start` | `name` (image, e.g. `schtasks.exe`) | Security 4688 or Sysmon event 1 shows it since the step started, or it is still running. `unknown` if neither log is readable and it has exited. |
+| `type` | Fields |
+|---|---|
+| `file_exists` | `path` |
+| `scheduled_task_exists` | `name` (optional `path`) |
+| `registry_value_exists` | `key` (`HKCU\...`, `HKLM\...`), optional `name` |
+| `service_exists` | `name` |
+| `process_ran_since_step_start` | `name` (image). Uses Security 4688 or Sysmon 1, else running processes. |
 
-A step **succeeds** when ART ran the test, the exit code is 0 (or not
-reported) and no verify check **fails**. After cleanup, any check (other than
-`process_ran_since_step_start`) that passed after the run and still passes is
-reported as "still present", and that step's cleanup fails.
+A step succeeds if ART ran it, the exit code is 0 (or unreported) and no
+check fails. After cleanup, a check that still passes fails that step's
+cleanup (`process_ran_since_step_start` excepted).
 
-## Stub module step (tests only)
+## Validation
 
-`{ "id", "title", "module": "stub-...", "params": {}, "depends_on": [] }`.
-Runs a stub module from `modules/` (marker files only); see
-[module-contract.md](module-contract.md). Scenarios with stub steps get an
-`ArtifactFolder` parameter (default `TTX-Lab`, under `%ProgramData%`).
-
-## Scenario parameters and profiles
-
-Each parameter: `{ name, default, description, type?, choices? }`, with
-`type` `string` (default), `choice` (one of `choices`) or `bool`. A scenario
-can name one `choice` parameter as `profileParameter` and give a `profiles`
-map; values resolve as **explicit value > the selected profile's value >
-default** (D14).
-
-## Validation levels
-
-- **Errors** (bad JSON shape, duplicate or forward `depends_on`, unknown
-  verify type, high-impact step without confirmation): not saved, not loaded.
-- **Incomplete** (no steps, empty `atomic_guid`, a `<placeholder>` left in a
-  verify check): saved as a draft, not loadable yet.
+- **Errors** (bad shape, forward `depends_on`, unknown verify type, missing
+  high-impact confirmation): not saved or loaded.
+- **Incomplete** (no steps, empty GUID, a `<placeholder>` in a verify check):
+  saved as a draft, not loadable.
 - **Warnings** (GUID not installed, technique mismatch, unknown input
-  argument): shown; nothing blocked.
+  argument): shown only.
 
-Four built-in scenarios ship ready to load: `discovery-first-look`,
-`persistence-schtask`, `persistence-run-key` and `collection-staging` (see the
-README). Their GUIDs were taken from the current ART atomics; if a lab host
-has a different ART version and a GUID is missing, that step shows a warning
-and the test can be re-picked in the builder.
+## Stub step (tests only)
+
+`{ "id", "title", "module": "stub-...", "params": {}, "depends_on": [] }`;
+see [module-contract.md](module-contract.md).

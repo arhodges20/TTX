@@ -1,6 +1,29 @@
 # Design decisions
 
 Notable decisions, newest last. Each entry: decision, options considered, why.
+Older entries are kept as history; the index shows what still applies.
+
+| # | Decision | Status |
+|---|---|---|
+| D1 | PowerShell 5.1 backend | Current |
+| D2 | Static UI with polling | Current |
+| D3 | Scenarios are JSON | Current (flat `scenarios/<id>.json`, D19) |
+| D4, D5, D16 | Module contract, marker helpers, artifact folder | Stub test modules only |
+| D6 | Steps run in background jobs, one at a time | Current |
+| D7 | One active session, state saved on every change | Current |
+| D8 | Per-session artifact subfolder | Superseded by D16 |
+| D9 | Checks without a Windows host | Current |
+| D10 | Localhost hardening | Current |
+| D11, D18 | Our own benign modules; emulation chain deferred | Superseded by D19 |
+| D12 | Scheduled-task scenario as ART tests | Current (GUIDs shipped, D21) |
+| D13 | Detections are likely, not guaranteed | Current |
+| D14 | Options via input-argument overrides | Current |
+| D15 | Cleanup through ART from saved state | Current |
+| D17 | Falcon preflight and calibration | Current, extended by D22 |
+| D19 | ART is the execution engine | Current |
+| D20 | Continue past failed steps | Current |
+| D21 | Built-in ready-to-run scenarios | Current |
+| D22 | EDR-agnostic preflight | Current |
 
 ## D1. Backend is Windows PowerShell 5.1 only
 
