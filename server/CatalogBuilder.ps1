@@ -82,6 +82,8 @@ function ConvertTo-TtxCatalogTest {
         dependencyExecutor = [string](Get-TtxMember $Test 'dependency_executor_name')
         dependencies       = $deps
         prereqDownloads    = (@($deps | Where-Object { $_.downloads }).Count -gt 0)
+        # Informational: the test's own command appears to fetch something.
+        commandDownloads   = (Test-TtxDownloadCommand ([string](Get-TtxMember $executor 'command')))
         highImpact         = (Test-TtxHighImpactTechnique $techId)
         yamlPath           = $YamlPath
     }
