@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "id": "collection-staging",
+  "name": "Collection: stage data in a temp archive",
+  "summary": "After a quick check of who they are, the intruder packs a folder into a zip in the user's temp folder, ready to take away. Uses ART's own sample folder, so no real user data is touched.",
+  "objectives": [
+    "Find the archive created in the temp folder and the process that created it.",
+    "Identify what was archived.",
+    "Tie the staging to the discovery that preceded it."
+  ],
+  "continue_on_failure": true,
+  "steps": [
+    {
+      "id": "user-1",
+      "title": "Current user (whoami /all)",
+      "tactic": "Discovery",
+      "technique": "T1033",
+      "atomic_guid": "aab580c7-cc30-4a7c-b5a9-46a29066b022",
+      "input_arguments": {},
+      "depends_on": [],
+      "verify": [],
+      "expected_detections": [],
+      "hunt_notes": [ "whoami.exe: the start of the activity on {{Host}}." ]
+    },
+    {
+      "id": "stage-1",
+      "title": "Zip a folder into the temp directory",
+      "tactic": "Collection",
+      "technique": "T1074.001",
+      "atomic_guid": "a57fbe4b-3440-452a-88a7-943531ac872a",
+      "input_arguments": {},
+      "depends_on": [ "user-1" ],
+      "verify": [ { "type": "file_exists", "path": "#{output_file}" } ],
+      "expected_detections": [ "PowerShell Compress-Archive writing a zip to a temp folder" ],
+      "hunt_notes": [ "powershell.exe Compress-Archive: the archive lands at {{output_file}}. Find the file-write event and its source folder." ]
+    }
+  ]
+}

@@ -135,9 +135,10 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   is a chain of Atomic Red Team tests: a T1059.001 (PowerShell) step followed
   by a T1053.005 (Scheduled Task) step that `depends_on` it. Each step only
   references an ART test by `auto_generated_guid` plus input-argument
-  overrides; the commands come from the atomics installed on the lab host. The
-  shipped file leaves `atomic_guid` empty: the facilitator picks the tests
-  from the catalog on the lab host, where the installed ART version is known.
+  overrides; the commands come from the atomics installed on the lab host.
+  Originally the shipped file left `atomic_guid` empty for the facilitator to
+  pick on the lab host; superseded by D21, which ships ready-to-run scenarios
+  with GUIDs.
 - **Options:** Our own benign scheduled-task modules (Milestone 2, now
   removed); hardcoding GUIDs from one ART release.
 - **Why:** ART tests are public, reviewed and widely used, so the commands are
@@ -324,4 +325,23 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   explicit option preserves the stricter default for scenarios where a later
   step really needs an earlier one to have worked. Cleanup is unchanged: every
   step that ran (including failed ones) is cleaned up.
+
+## D21. Built-in, ready-to-run scenarios
+
+- **Decision:** Ship four scenarios with `atomic_guid` filled in
+  (`discovery-first-look`, `persistence-schtask`, `persistence-run-key`,
+  `collection-staging`), so the tool works out of the box. Tests were chosen
+  from the current ART atomics with these rules: no `elevation_required`, no
+  prereqs (so nothing is downloaded), anything left on the host has an ART
+  cleanup command, no credential access, nothing destructive or high-impact,
+  and nothing that reaches outside the host. Input arguments are overridden
+  where that makes the artifact safer (the scheduled task runs once at 06:00;
+  the Run value points at notepad.exe). Each step carries expected
+  detections, hunt notes, and verify checks where it creates something.
+- **Options:** Keep empty GUIDs (D12 as first written); ship many scenarios.
+- **Why:** The facilitator asked for scenarios that load and run without
+  setup. GUIDs are stable across ART updates; if a lab host's ART version
+  lacks one, the existing "not found in the installed atomics" warning says so
+  and the step can be re-picked in the builder. Commands still come from ART,
+  not this repo (D19).
 

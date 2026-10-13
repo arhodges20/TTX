@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "id": "persistence-run-key",
+  "name": "Persistence via Run key",
+  "summary": "A command shell writes a file, then adds a per-user Run key so a program starts at every logon. Trainees hunt the registry change and tie it to the process that made it.",
+  "objectives": [
+    "Find the registry value added under HKCU\\...\\CurrentVersion\\Run and what it would launch.",
+    "Identify the process that wrote it and what it did just before.",
+    "Explain how this persistence would trigger."
+  ],
+  "notes": [
+    "The Run value points at notepad.exe, so if someone logs on before Cleanup, Notepad opens. Cleanup removes the value."
+  ],
+  "continue_on_failure": true,
+  "steps": [
+    {
+      "id": "cmd-1",
+      "title": "Command shell writes and reads a file",
+      "tactic": "Execution",
+      "technique": "T1059.003",
+      "atomic_guid": "127b4afe-2346-4192-815c-69042bec570e",
+      "input_arguments": {},
+      "depends_on": [],
+      "verify": [ { "type": "file_exists", "path": "#{file_contents_path}" } ],
+      "expected_detections": [],
+      "hunt_notes": [ "cmd.exe echo/type of {{file_contents_path}}: a file write by the shell that later touches the registry." ]
+    },
+    {
+      "id": "runkey-1",
+      "title": "Run key added for the current user",
+      "tactic": "Persistence",
+      "technique": "T1547.001",
+      "atomic_guid": "e55be3fd-3521-4610-9d1a-e210e42dcf05",
+      "input_arguments": { "command_to_execute": "C:\\Windows\\System32\\notepad.exe" },
+      "depends_on": [ "cmd-1" ],
+      "verify": [ { "type": "registry_value_exists", "key": "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", "name": "Atomic Red Team" } ],
+      "expected_detections": [ "reg.exe adding a value under CurrentVersion\\Run" ],
+      "hunt_notes": [ "reg.exe ADD ...\\CurrentVersion\\Run, value 'Atomic Red Team' = {{command_to_execute}}. Pivot to the parent cmd.exe and the file written in the previous step." ]
+    }
+  ]
+}

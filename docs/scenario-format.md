@@ -102,6 +102,8 @@ default** (D14).
 - **Warnings** (GUID not installed, technique mismatch, unknown input
   argument): shown; nothing blocked.
 
-The shipped example, `scenarios/persistence-schtask.json` (T1059.001 ->
-T1053.005), is deliberately incomplete: choose its tests in the builder on the
-lab host.
+Four built-in scenarios ship ready to load: `discovery-first-look`,
+`persistence-schtask`, `persistence-run-key` and `collection-staging` (see the
+README). Their GUIDs were taken from the current ART atomics; if a lab host
+has a different ART version and a GUID is missing, that step shows a warning
+and the test can be re-picked in the builder.

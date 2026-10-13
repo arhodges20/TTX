@@ -4,9 +4,15 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
-### Continue past failed steps, dark mode, elevated smoke test
+### Built-in scenarios, continue past failed steps, dark mode, elevated smoke test
 
 #### Added
+- **Four built-in scenarios, ready to load** (D21): `discovery-first-look`
+  (8 discovery steps), `persistence-schtask` (encoded PowerShell → scheduled
+  task), `persistence-run-key` (cmd file write → HKCU Run value) and
+  `collection-staging` (whoami → zip staging in temp). No elevation, no
+  prereq downloads, ART cleanup for everything left behind; expected
+  detections, hunt notes and verify checks filled in.
 - **Continue past failed steps** (D20): a session option (checkbox in the
   session header, `POST /api/session/options`) with a scenario default
   (`continue_on_failure`, also in the builder). When on, Run all keeps going

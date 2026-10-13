@@ -113,6 +113,24 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
 **Theme:** the Theme picker in the top bar switches between System (follows
 Windows), Light and Dark; the choice is remembered in the browser.
 
+## Built-in scenarios
+
+These ship in `scenarios\` and are ready to load. Each step is an ART test
+that needs no elevation and downloads nothing. Every step that leaves
+something behind has an ART cleanup command. They were picked from
+Invoke-AtomicRedTeam 2.1.0 / the atomics current in October 2026.
+**Continue past failed steps** is on by default for all four.
+
+| Scenario | Chain | Leaves behind until Cleanup |
+|---|---|---|
+| **Discovery: first look around the host** (`discovery-first-look`) | T1033 whoami → T1082 systeminfo → T1016 network config → T1057 tasklist → T1087.001 local accounts → T1069.001 local groups → T1049 connections → T1135 shares | Nothing (read-only) |
+| **Persistence via scheduled task** (`persistence-schtask`) | T1059.001 encoded PowerShell → T1053.005 `schtasks /create` task `spawn` | Scheduled task `\spawn` (runs once at 06:00) |
+| **Persistence via Run key** (`persistence-run-key`) | T1059.003 cmd writes `%TEMP%\test.bin` → T1547.001 HKCU Run value `Atomic Red Team` = `notepad.exe` | The file and the Run value (Notepad opens at logon until cleaned) |
+| **Collection: stage data in a temp archive** (`collection-staging`) | T1033 whoami → T1074.001 `Compress-Archive` of ART's sample folder to `%TEMP%\Folder_to_zip.zip` | The zip |
+
+Each step has expected detections, hunt notes and, where it creates
+something, a verify check. Edit any of them in the Scenario builder.
+
 ## How it works
 
 ```
@@ -213,18 +231,10 @@ an AID. Open **ART catalog**. The first build takes about a minute. Expect
 over a thousand Windows tests, and check that searching `T1053.005` lists the
 scheduled-task tests.
 
-**4. Set up the example scenario.** The repo's
-`scenarios\persistence-schtask.json` has empty GUIDs on purpose.
-1. In **Exercise**, select "Persistence via scheduled task" and click
-   **Edit in builder**.
-2. For step 1 (T1059.001), click **Pick from catalog** and choose a test you
-   are comfortable running. Prefer one with no prereq downloads and no
-   elevation.
-3. For step 2 (T1053.005), pick a scheduled-task test. Set its verify check
-   to the task name the test creates: look at its input arguments or command,
-   e.g. `#{task_name}`.
-4. Enter the expected detections and hunt notes, preview the commands, and
-   **Save**.
+**4. Pick a built-in scenario.** Four scenarios ship ready to load (see
+[Built-in scenarios](#built-in-scenarios)). Start with "Persistence via
+scheduled task". If a step says its GUID isn't in the installed atomics, your
+ART version differs; pick a similar test for that step in the builder.
 
 **5. Run it.** Optionally run **Falcon calibration** first and mark the
 result. Load the scenario and click **Run all**.
@@ -280,7 +290,7 @@ count, any rows that didn't match, and what Falcon detected.
 This repo is developed in a Linux cloud environment and checked with
 PowerShell 7:
 - `tests/Test-Syntax.ps1`.
-- `tests/Invoke-SmokeTest.ps1` against the mock ART (79 checks).
+- `tests/Invoke-SmokeTest.ps1` against the mock ART (82 checks).
 - PSScriptAnalyzer's `PSUseCompatibleSyntax`, `PSUseCompatibleCommands` and
   `PSUseCompatibleTypes` rules targeting Windows PowerShell 5.1.
 - A headless-browser walkthrough of the UI against a running server.

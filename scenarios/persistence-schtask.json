@@ -2,51 +2,40 @@
   "schemaVersion": 2,
   "id": "persistence-schtask",
   "name": "Persistence via scheduled task",
-  "summary": "PowerShell execution followed by scheduled-task persistence, each step an Atomic Red Team test. Trainees hunt the PowerShell activity and the task it leads to.",
+  "summary": "Encoded PowerShell execution followed by a scheduled task that launches cmd.exe. Trainees hunt the PowerShell activity and the task it leads to.",
   "objectives": [
-    "Find the PowerShell execution and its parent process.",
-    "Find the scheduled task that was created, its action, and who created it.",
+    "Find the encoded PowerShell command, decode it, and identify its parent.",
+    "Find the scheduled task that was created (name, action, trigger) and who created it.",
     "Tie the two steps together on a timeline."
   ],
   "notes": [
-    "Before first use: on the lab host, open the Scenario builder, pick one T1059.001 test and one T1053.005 test from the catalog (this sets atomic_guid), review the input arguments and the exact command, set the verify check to the task name the chosen test creates, enter expected detections and hunt notes, then save.",
-    "atomic_guid is deliberately empty in the repo: tests are chosen from the ART version installed on the lab host."
+    "The task 'spawn' is set to run once at 06:00, so it normally won't fire before Cleanup removes it. If you run this before 06:00, change the time input argument in the builder."
   ],
+  "continue_on_failure": true,
   "steps": [
     {
       "id": "exec-1",
-      "title": "Execution via PowerShell",
+      "title": "Encoded PowerShell command",
       "tactic": "Execution",
       "technique": "T1059.001",
-      "atomic_guid": "",
+      "atomic_guid": "a538de64-1c74-46ed-aa60-b995ed302598",
       "input_arguments": {},
       "depends_on": [],
       "verify": [],
-      "expected_detections": [],
-      "hunt_notes": [
-        "Start from powershell.exe process events on {{Host}} in the step's UTC window and look at the parent process and command line."
-      ]
+      "expected_detections": [ "powershell.exe with -e / -EncodedCommand" ],
+      "hunt_notes": [ "Start from powershell.exe process events on {{Host}} in this step's UTC window; decode the -e argument and look at the parent process." ]
     },
     {
       "id": "persist-1",
-      "title": "Persistence via scheduled task",
+      "title": "Scheduled task created with schtasks.exe",
       "tactic": "Persistence",
       "technique": "T1053.005",
-      "atomic_guid": "",
-      "input_arguments": {},
-      "depends_on": [
-        "exec-1"
-      ],
-      "verify": [
-        {
-          "type": "scheduled_task_exists",
-          "name": "<task name>"
-        }
-      ],
-      "expected_detections": [],
-      "hunt_notes": [
-        "Look for the task registration (schtasks.exe or the Task Scheduler API) and pivot to the task's action and the process that created it."
-      ]
+      "atomic_guid": "42f53695-ad4a-4546-abb6-7d837f644a71",
+      "input_arguments": { "time": "06:00" },
+      "depends_on": [ "exec-1" ],
+      "verify": [ { "type": "scheduled_task_exists", "name": "spawn" } ],
+      "expected_detections": [ "schtasks.exe /create from a command shell" ],
+      "hunt_notes": [ "schtasks.exe /Create /TN spawn: note the action ({{task_command}}) and the start time ({{time}}), then pivot to the parent process." ]
     }
   ]
 }
