@@ -4,6 +4,44 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Added
+- Engine: typed scenario options (`string`, `choice`, `bool`) with
+  `profileParameter`/`profiles` (explicit value > profile value > default);
+  step `dependsOn`, enforced with a 409 and a warning event; per-step recorded
+  data (`Set-TtxStepData`, passed back as `Context.StepData`/`AllStepData`,
+  including to Cleanup after a restart); per-module `TimeoutSeconds`;
+  modules can declare `Tactic` and `ExpectedDetections`, and `Get-TtxHunt`
+  may return a structured hunt (lineage, Falcon events, Windows evidence,
+  queries, pivots).
+
+- Falcon preflight (`server/Preflight.ps1`): at session load records host,
+  user, elevation, UTC time, `CSFalconService` status, and the sensor AID;
+  warns (never blocks) if the sensor isn't running. `GET /api/preflight`.
+- Calibration check: `POST /api/session/calibrate` starts
+  `choice /m crowdstrike_sample_detection /t 5 /d Y`;
+  `POST /api/session/calibration` records whether it fired (D17).
+- Expected-vs-actual detection checklist: modules declare `ExpectedDetections`;
+  `POST /api/session/steps/{id}/detections` records fired / not-fired / unknown
+  per detection, saved to session state.
+- Answer key: `runs/<id>/answer-key.md`, generated from this run's real values
+  (host, AID, task name, paths, UTC window) and refreshed after every step and
+  checklist change; served at `GET /api/session/answer-key`.
+- Hunt guidance upgraded to structured form (lineage, Falcon events, Windows
+  evidence, starter queries, pivots) with `{{Placeholder}}` tokens filled in
+  per run, on the three scheduled-task modules.
+
+### Changed
+- Scheduled-task modules declare `Tactic` and `ExpectedDetections` and return
+  structured hunt guidance; scenario steps declare `dependsOn` so ordering is
+  enforced.
+- Docs reconciled with what was built: brief gains a "What this product is"
+  section and a scope boundary; decisions D12/D14/D15 marked proposed-not-built
+  and D18 records the scope decision; module contract and scenario format cover
+  the new metadata, hunt form, step data, typed options, profiles, and
+  `dependsOn`.
+- Artifacts go directly in `%ProgramData%\<ArtifactFolder>` (no per-session
+  subfolder; `%ProgramData%\TTX-Lab` accepted) (D16).
+
 ### Fixed
 - `tests/Test-Syntax.ps1` parsed every file (CSS, HTML, Markdown) as
   PowerShell on Windows PowerShell 5.1, where `Get-ChildItem -LiteralPath`

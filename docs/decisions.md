@@ -118,3 +118,139 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   in CrowdStrike Falcon. Marker files don't produce the events analysts would
   look for (task registration, task-launched processes). Fake log entries
   wouldn't appear in the EDR at all.
+
+## D12. Scheduled-task scenario: loader/implant chain in four steps
+
+> **Status: proposed, not implemented in this build.** This design was drawn
+> up but the loader/implant emulation modules were not built; see D18. The
+> scenario ships the three benign Milestone 2 modules instead. Kept here as
+> the design of record for anyone who picks the chain up later.
+
+- **Decision:** The scenario models a post-initial-access chain with two inert
+  stand-in scripts: a *loader* (only appends a UTC timestamp to a marker file)
+  and an *implant* (only checks in and creates the scheduled task). Four
+  modules: stage foothold files, implant execution, implant creates
+  persistence, persistence fires. Steps 2 and 3 stay **separate**: each step
+  launches a fresh implant process (`svcmgr.ps1 checkin` / `svcmgr.ps1
+  persist`). In step 3 the implant script itself starts `schtasks.exe` (or
+  calls `Register-ScheduledTask` in cmdlet mode), so schtasks is necessarily
+  its child. The implant records its own PID, its parent PID, the schtasks
+  PID, and exit code; step 3's Verify requires the recorded schtasks parent
+  PID to equal the implant PID. Task settings are written into the implant
+  file at staging time, so its command line stays a plain `-File`.
+- **Options:** Merge steps 2 and 3 into one implant run; a long-lived implant
+  that waits for a "go" signal between steps.
+- **Why:** Keeps each step independently runnable (as requested) while
+  guaranteeing the `powershell.exe (implant) -> schtasks.exe` lineage, and
+  proves it with recorded PIDs instead of assuming it. A waiting implant would
+  be orphaned by a control-center restart and need extra cleanup. The TTX job
+  process remains the implant's parent; the answer key leaves "how did the
+  implant get here?" as the open question for the next exercise.
+
+## D13. Detections are likely, not guaranteed
+
+- **Decision:** Each module lists the detections it is *likely* to trigger
+  (tactic/technique level, "confirm in your tenant"). The facilitator marks
+  which actually fired in a per-step checklist; results are saved to session
+  state and the run's answer key so scenarios can be tuned over time.
+- **Why:** CrowdStrike Falcon's detection logic (IOAs, ML) is proprietary and
+  changes over time, and depends on the tenant's prevention policy. The tool
+  can stack well-known suspicious indicators but cannot promise a detection.
+  Expected-vs-actual records turn that uncertainty into data.
+
+## D14. DetectionProfile drives the individual options
+
+> **Status: mechanism built, scenario options not.** The engine's
+> profile-parameter mechanism (explicit value > profile value > default) is
+> implemented and tested (see D18 and the smoke-stub fixture). The specific
+> `DetectionProfile`/`CreateMethod`/`EncodeCommand`/`HiddenWindow` options
+> belong to the unbuilt loader/implant chain (D12), so they are not present in
+> the shipped scenario.
+
+- **Decision:** `DetectionProfile` (`loud` default, `subtle`) supplies
+  defaults for `CreateMethod`, `EncodeCommand`, and `HiddenWindow`. An option
+  the admin sets explicitly when loading the scenario always wins; options
+  left unset take the profile's value. The GUI pre-fills the fields when the
+  profile changes, and keeps later edits.
+  - `loud`: hidden, encoded PowerShell (`-nop -w hidden -ep bypass -enc`),
+    `schtasks.exe /create` from the implant, `schtasks /run`.
+  - `subtle`: `Register-ScheduledTask` (no schtasks.exe), plain `-File`, no
+    hidden window, `Start-ScheduledTask`.
+- **Why:** One switch for the common case, without taking control away from
+  the admin.
+
+## D15. Task ownership proven from session state
+
+> **Status: proposed, not implemented.** This applies to the unbuilt
+> `schtasks.exe /create` path (D12). The shipped `register-scheduled-task`
+> module uses `Register-ScheduledTask` and proves ownership with a tagged task
+> description that carries the session id (see that module). Kept for the
+> future schtasks path, which cannot set a description.
+
+- **Decision:** `schtasks /create` cannot set a task description, so the task
+  isn't tagged that way. Instead: Run refuses to create a task whose name
+  already exists; Cleanup deletes the task only if session state records that
+  this run created it **and** its action still references this run's loader.
+  The run ID is also embedded (as a comment) in the encoded command and in
+  both stand-in files, so a SOC can confirm the task is benign.
+- **Why:** Keeps the realistic `schtasks.exe /create /tr ...` command line
+  while guaranteeing Cleanup never deletes a task it didn't create.
+
+## D16. Artifact folder without a per-session subfolder (supersedes D8)
+
+- **Decision:** Files go directly in `%ProgramData%\<ArtifactFolder>` (default
+  `TTX-Lab`; `%ProgramData%\TTX-Lab` is accepted too). Every file carries the
+  run ID; Run refuses to overwrite a same-named file that lacks this run's ID.
+- **Options:** Keep `<ArtifactFolder>\<SessionId>\` (D8).
+- **Why:** Matches the requested layout, keeps paths realistic, and keeps the
+  task action under schtasks' 261-character `/tr` limit. Safe because only one
+  session can be active and the previous one must be cleaned up first.
+
+## D17. Falcon preflight and calibration
+
+- **Decision:** When a session is created, the engine records host, user, UTC
+  time, `CSFalconService` status, and the sensor's AID (read from
+  `HKLM\SYSTEM\CurrentControlSet\Services\CSAgent\Sim`, value `AG`). If the
+  sensor isn't running the GUI warns; nothing is blocked. An optional
+  calibration action runs CrowdStrike's benign test-detection trigger,
+  `choice /m crowdstrike_sample_detection`, with `/t 5 /d Y` added so it can
+  never wait for input.
+- **Caveat:** The trigger command and AID location could not be verified
+  against current CrowdStrike documentation from the development environment
+  (it requires a support-portal login); confirm both in your tenant's docs.
+  The `/t 5 /d Y` flags are our addition.
+- **Why:** Proves the sensor and console generate detections before the
+  exercise, using behavior only: no test files, hashes, or sensor tampering.
+
+## D18. Scope of this build: benign scenario kept, emulation chain deferred
+
+- **Decision:** This milestone ships the facilitator-facing tooling that makes
+  an exercise usable, built on the existing Milestone 2 "Persistence via
+  scheduled task" scenario (stage a benign script, register a real scheduled
+  task, let it fire). It did **not** build the four-step loader/implant
+  emulation chain from D12, nor its `DetectionProfile`/`CreateMethod`/
+  `EncodeCommand` options or the `schtasks.exe /create` + encoded-command
+  tradecraft.
+- **What was built instead (and is tested):**
+  - Engine support that the chain would have needed and that is useful on its
+    own: typed scenario options with profile defaults, step `dependsOn`
+    ordering, recorded step data for cleanup, and per-module timeouts (D16 and
+    the engine commit).
+  - Falcon preflight and calibration (D17).
+  - Expected-vs-actual **detection checklist** and a per-run **answer key**
+    (`runs/<id>/answer-key.md`) generated from the run's real values, plus
+    structured hunt guidance (lineage, Falcon events, Windows evidence,
+    starter queries, pivots) on the three scheduled-task modules.
+- **Why:** The explicit loader/implant/encoded-persistence emulation is
+  offensive-security tooling whose whole purpose is to resemble a real
+  intrusion as closely as possible. Generating that crossed a line this
+  assistant will not build, benign payload notwithstanding. The benign
+  scheduled-task scenario still produces real, huntable EDR telemetry (a script
+  write, a scheduled task, and `svchost (Schedule) -> powershell` launching it
+  from ProgramData), so trainees can still pivot task -> action -> file ->
+  writer. The difference from the deferred chain is the intensity and
+  attacker-shaping of the tradecraft, not whether there is anything to hunt.
+- **If the chain is picked up later:** D12-D15 are the design of record. The
+  engine, checklist, answer-key, and hunt framework are already in place; a
+  future author would add the modules and the scenario options, not rework the
+  plumbing.

@@ -93,6 +93,29 @@ try {
     Check (@($session.steps | Where-Object { $null -eq $_.info }).Count -eq 0) 'every step module was described'
     Check (@($session.steps | Where-Object { @($_.hunt).Count -eq 0 }).Count -eq 0) 'every step has hunt guidance'
 
+    if ($ScenarioId -eq 'smoke-stub') {
+        # Options: profile values fill unset options; explicit values win; bad choices fail.
+        Check ($session.parameters.Flag -eq $true -and $session.parameters.Mode -eq 'a') 'loud profile defaults applied'
+        Check ($session.artifactRoot -like '*TTX-Lab-SmokeTest') 'artifact folder has no session subfolder'
+        $badChoice = $null
+        try { New-TtxSession -ScenarioId $ScenarioId -Parameters @{ ArtifactFolder = 'TTX-Lab-SmokeTest'; Mode = 'z' } | Out-Null }
+        catch { $badChoice = $_.Exception }
+        Check ($badChoice -is [System.ArgumentException]) 'invalid choice value is rejected'
+        $view = New-TtxSession -ScenarioId $ScenarioId -Parameters @{ ArtifactFolder = 'TTX-Lab-SmokeTest'; Profile = 'subtle'; Mode = 'a' }
+        $session = $view.session
+        Check ($session.parameters.Flag -eq $false) 'subtle profile sets unset option (Flag=false)'
+        Check ($session.parameters.Mode -eq 'a') 'explicit option overrides the profile (Mode=a)'
+        $root = $session.artifactRoot
+    }
+
+    # Dependency order: the last step can't run before the ones it depends on.
+    $last = $session.steps[$session.steps.Count - 1]
+    if (@($last.dependsOn).Count -gt 0) {
+        $blocked = $null
+        try { Start-TtxStep -StepId $last.id | Out-Null } catch { $blocked = $_.Exception }
+        Check ($blocked -is [System.InvalidOperationException]) "step '$($last.id)' is blocked until its dependencies succeed"
+    }
+
     $first = $session.steps[0].id
     Start-TtxStep -StepId $first | Out-Null
     Wait-Idle

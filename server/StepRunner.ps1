@@ -9,7 +9,7 @@
     returns:
 
         { ok, error, verify: { passed, detail }, info, hunt, logs: [ ... ],
-          artifacts: [ { type, location, detail, ts } ], pid }
+          artifacts: [ { type, location, detail, ts } ], pid, data }
 
     See docs/module-contract.md.
 #>
@@ -23,6 +23,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $TtxLogBuffer = New-Object System.Collections.ArrayList
 $TtxArtifactBuffer = New-Object System.Collections.ArrayList
+$TtxStepData = @{}
 
 function Write-TtxLog {
     param(
@@ -40,6 +41,27 @@ function Register-TtxArtifact {
         [string]$Detail = ''
     )
     [void]$TtxArtifactBuffer.Add(@{ ts = (Get-Date).ToString('o'); type = $Type; location = $Location; detail = $Detail })
+}
+
+# Saves a value in the step's recorded data (session state). Cleanup gets it
+# back as $Context.StepData, even after a control-center restart.
+function Set-TtxStepData {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        $Value
+    )
+    $TtxStepData[$Key] = $Value
+}
+
+function ConvertTo-TtxPairList {
+    param($Items, [string[]]$Keys)
+    return , @(foreach ($i in @($Items)) {
+            if ($null -eq $i) { continue }
+            if ($i -is [string]) { $h = @{}; $h[$Keys[0].ToLowerInvariant()] = $i; $h; continue }
+            $h = @{}
+            foreach ($k in $Keys) { $h[$k.ToLowerInvariant()] = [string]$i[$k] }
+            $h
+        })
 }
 
 function Invoke-TtxVerifyCheck {
@@ -60,14 +82,20 @@ $result = @{
     logs      = $TtxLogBuffer
     artifacts = $TtxArtifactBuffer
     pid       = $PID
+    data      = $TtxStepData
 }
 
 try {
     . (Join-Path $PSScriptRoot 'TtxCommon.ps1')
+    . (Join-Path $PSScriptRoot 'Preflight.ps1')
     . (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules') '_common') 'TtxArtifacts.ps1')
 
     $context = ConvertFrom-TtxJson -Json $ContextJson
     if ($null -eq $context.Parameters) { $context.Parameters = @{} }
+    if ($context.StepData -isnot [hashtable]) { $context.StepData = @{} }
+    if ($context.AllStepData -isnot [hashtable]) { $context.AllStepData = @{} }
+    # Start from what earlier runs recorded; the module may add to or replace it.
+    foreach ($k in @($context.StepData.Keys)) { $TtxStepData[$k] = $context.StepData[$k] }
 
     if (-not (Test-Path -LiteralPath $ModulePath -PathType Leaf)) {
         throw "Module file not found: $ModulePath"
@@ -92,19 +120,39 @@ try {
     switch ($Operation) {
         'describe' {
             $result.info = @{
-                id          = [string]$info.Id
-                name        = [string]$info.Name
-                description = [string]$info.Description
-                version     = [string]$info.Version
-                technique   = [string]$info.Technique
-                isStub      = [bool]$info.IsStub
-                parameters  = @(foreach ($p in @($info.Parameters)) {
+                id                 = [string]$info.Id
+                name               = [string]$info.Name
+                description        = [string]$info.Description
+                version            = [string]$info.Version
+                technique          = [string]$info.Technique
+                tactic             = [string]$info.Tactic
+                isStub             = [bool]$info.IsStub
+                timeoutSeconds     = [int]$info.TimeoutSeconds
+                parameters         = @(foreach ($p in @($info.Parameters)) {
                         if ($null -ne $p) { @{ name = [string]$p.Name; default = $p.Default; description = [string]$p.Description } }
                     })
+                expectedDetections = @(foreach ($d in @($info.ExpectedDetections)) {
+                        if ($null -ne $d) { @{ id = [string]$d.Id; tactic = [string]$d.Tactic; technique = [string]$d.Technique; description = [string]$d.Description } }
+                    })
             }
-            $result.hunt = @(foreach ($h in @(Get-TtxHunt -Context $context)) {
-                    if ($null -ne $h) { @{ title = [string]$h.Title; where = [string]$h.Where; what = [string]$h.What } }
-                })
+            # Hunt guidance: either a list of @{ Title; Where; What } (simple form)
+            # or a hashtable with Items, Lineage, FalconEvents, WindowsEvidence,
+            # Queries, and Pivots. Text may contain {{Placeholders}} that the
+            # engine fills in with this run's values.
+            $raw = Get-TtxHunt -Context $context
+            $h = @{ items = @(); lineage = @(); falconEvents = @(); windowsEvidence = @(); queries = @(); pivots = @() }
+            if ($raw -is [System.Collections.IDictionary]) {
+                $h.items = ConvertTo-TtxPairList $raw['Items'] 'Title', 'Where', 'What'
+                $h.lineage = @(@($raw['Lineage']) | Where-Object { $_ } | ForEach-Object { [string]$_ })
+                $h.falconEvents = ConvertTo-TtxPairList $raw['FalconEvents'] 'Name', 'Detail'
+                $h.windowsEvidence = ConvertTo-TtxPairList $raw['WindowsEvidence'] 'Name', 'Detail'
+                $h.queries = ConvertTo-TtxPairList $raw['Queries'] 'Title', 'Query'
+                $h.pivots = @(@($raw['Pivots']) | Where-Object { $_ } | ForEach-Object { [string]$_ })
+            }
+            else {
+                $h.items = ConvertTo-TtxPairList @($raw) 'Title', 'Where', 'What'
+            }
+            $result.hunt = $h
             $result.ok = $true
         }
         'run' {

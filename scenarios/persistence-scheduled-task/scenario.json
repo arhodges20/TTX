@@ -12,7 +12,7 @@
     {
       "name": "ArtifactFolder",
       "default": "TTX-Lab",
-      "description": "Folder under %ProgramData% where the script and its log are written. Each session gets its own subfolder."
+      "description": "Folder under %ProgramData% where the script and its log are written."
     },
     {
       "name": "ScriptName",
@@ -40,6 +40,7 @@
       "id": "register-task",
       "title": "Register a scheduled task that runs the script at logon",
       "module": "register-scheduled-task",
+      "dependsOn": ["stage-script"],
       "facilitatorNotes": [
         "Setting: the intruder registers a task with an innocent-looking name so the script survives reboots.",
         "Analysts: find the task registration. What is its trigger and exact command line?",
@@ -51,6 +52,7 @@
       "id": "task-runs",
       "title": "The task fires and runs the script",
       "module": "run-scheduled-task",
+      "dependsOn": ["register-task"],
       "facilitatorNotes": [
         "Setting: the user logs on; the task fires and runs the script hidden.",
         "Analysts: find powershell.exe launched by the Task Scheduler (parent svchost.exe) and what it wrote.",

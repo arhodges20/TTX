@@ -77,6 +77,15 @@ function Invoke-TtxRequest {
             Send-TtxJson $res @{ scenarios = (Get-TtxScenarioList) }
             return
         }
+        if ($method -eq 'GET' -and $path -eq '/api/preflight') {
+            Send-TtxJson $res (Get-TtxPreflight)
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/session/answer-key') {
+            $key = Get-TtxAnswerKey
+            Send-TtxResponse -Response $res -ContentType 'text/markdown' -Body $key.markdown
+            return
+        }
         if ($method -eq 'GET' -and $path -eq '/api/session') {
             $since = 0
             [void][int]::TryParse([string]$req.QueryString['since'], [ref]$since)
@@ -97,12 +106,24 @@ function Invoke-TtxRequest {
                 Send-TtxJson $res (Start-TtxRunAll)
                 return
             }
+            if ($path -eq '/api/session/calibrate') {
+                Send-TtxJson $res (Invoke-TtxCalibration)
+                return
+            }
+            if ($path -eq '/api/session/calibration') {
+                Send-TtxJson $res (Set-TtxCalibrationResult -Result ([string]$body.result) -Notes ([string]$body.notes))
+                return
+            }
             if ($path -eq '/api/session/cleanup') {
                 Send-TtxJson $res (Start-TtxCleanup)
                 return
             }
             if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/run$') {
                 Send-TtxJson $res (Start-TtxStep -StepId $Matches[1])
+                return
+            }
+            if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/detections$') {
+                Send-TtxJson $res (Set-TtxDetectionResult -StepId $Matches[1] -DetectionId ([string]$body.detectionId) -Result ([string]$body.result) -Notes ([string]$body.notes))
                 return
             }
         }

@@ -7,12 +7,14 @@ function Get-TtxModuleInfo {
         Id          = 'stage-script'
         Name        = 'Stage stand-in script'
         Description = 'Writes a benign PowerShell script to the artifact folder. When run, the script only appends one line to a .log file beside it.'
-        Version     = '1.0.0'
+        Version     = '1.1.0'
         Technique   = ''
+        Tactic      = 'Setup'
         IsStub      = $false
         Parameters  = @(
             @{ Name = 'ScriptName'; Default = 'updater.ps1'; Description = 'File name of the stand-in script.' }
         )
+        ExpectedDetections = @()
     }
 }
 
@@ -58,16 +60,22 @@ function Invoke-TtxCleanup {
 
 function Get-TtxHunt {
     param([hashtable]$Context)
-    @(
-        @{
-            Title = 'Script written to ProgramData'
-            Where = 'Falcon: NewScriptWritten events; file write telemetry for C:\ProgramData'
-            What  = 'A new .ps1 file under C:\ProgramData written by powershell.exe. Note the folder and file name for the next steps.'
-        },
-        @{
-            Title = 'Who wrote it'
-            Where = 'Falcon process tree for the writing process (ProcessRollup2)'
-            What  = 'The powershell.exe that wrote the file, its parent process and command line, and the user account.'
-        }
-    )
+    @{
+        Lineage = @(
+            'powershell.exe (TTX job) writes {{ArtifactRoot}}\{{ScriptName}}'
+        )
+        FalconEvents = @(
+            @{ Name = 'NewScriptWritten'; Detail = 'New .ps1 under C:\ProgramData; confirm in your tenant.' },
+            @{ Name = 'ProcessRollup2'; Detail = 'The powershell.exe that wrote the file, its parent, command line and user.' }
+        )
+        WindowsEvidence = @(
+            @{ Name = 'File on disk'; Detail = '{{ArtifactRoot}}\{{ScriptName}} - header comment identifies it as a TTX training artifact with the session id.' }
+        )
+        Queries = @(
+            @{ Title = 'Script write on this host'; Query = '#event_simpleName=NewScriptWritten aid={{Aid}} TargetFileName=/{{ScriptName}}/i' }
+        )
+        Pivots = @(
+            'This is the starting foothold file. Next: the scheduled task that references it, and the process that runs it.'
+        )
+    }
 }
