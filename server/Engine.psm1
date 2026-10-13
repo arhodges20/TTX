@@ -21,6 +21,7 @@ $script:Ttx = @{
     Job            = $null                                  # running background job
     JobItem        = $null                                  # @{ stepId; op } for that job
     JobStarted     = $null
+    JobTimeoutSec  = 120
 }
 
 $script:IdPattern = '^[A-Za-z0-9][A-Za-z0-9_-]*$'
@@ -101,6 +102,7 @@ function Get-TtxModulePath {
 }
 
 # Returns the scenario's parameter list, always including ArtifactFolder.
+# Each parameter: name, default, description, type (string|choice|bool), choices.
 function Get-TtxScenarioParameters {
     param([hashtable]$Scenario)
     $list = @()
@@ -108,12 +110,85 @@ function Get-TtxScenarioParameters {
     foreach ($p in @($Scenario.parameters)) {
         if ($null -eq $p) { continue }
         if ($p.name -eq 'ArtifactFolder') { $hasFolder = $true }
-        $list += , @{ name = [string]$p.name; default = $p.default; description = [string]$p.description }
+        $type = [string]$p.type
+        if ($type -notin 'string', 'choice', 'bool') { $type = 'string' }
+        $list += , @{
+            name        = [string]$p.name
+            default     = $p.default
+            description = [string]$p.description
+            type        = $type
+            choices     = @($p.choices | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+        }
     }
     if (-not $hasFolder) {
-        $list += , @{ name = 'ArtifactFolder'; default = 'TTX-Lab'; description = 'Folder under %ProgramData% where stand-in artifacts are written.' }
+        $list += , @{ name = 'ArtifactFolder'; default = 'TTX-Lab'; description = 'Folder under %ProgramData% where stand-in artifacts are written.'; type = 'string'; choices = @() }
     }
     return , $list
+}
+
+# Profiles: an optional scenario-level map, e.g.
+#   "profileParameter": "DetectionProfile",
+#   "profiles": { "loud": { "EncodeCommand": true }, "subtle": { ... } }
+# Options the admin sets explicitly win; unset ones take the profile's value.
+function Get-TtxScenarioProfiles {
+    param([hashtable]$Scenario)
+    if ($Scenario.profiles -is [hashtable]) { return $Scenario.profiles }
+    return @{}
+}
+
+function ConvertTo-TtxParameterValue {
+    param([hashtable]$Definition, $Value)
+    switch ($Definition.type) {
+        'bool' {
+            if ($Value -is [bool]) { return $Value }
+            $text = ([string]$Value).Trim().ToLowerInvariant()
+            if ($text -in 'true', '1', 'yes', 'on') { return $true }
+            if ($text -in 'false', '0', 'no', 'off') { return $false }
+            throw (New-TtxBadRequest "$($Definition.name) must be true or false (got '$Value').")
+        }
+        'choice' {
+            $text = ([string]$Value).Trim()
+            $match = @($Definition.choices | Where-Object { $_ -eq $text })
+            if ($match.Count -eq 0) {
+                throw (New-TtxBadRequest "$($Definition.name) must be one of: $($Definition.choices -join ', ') (got '$text').")
+            }
+            return [string]$match[0]
+        }
+        default { return ([string]$Value).Trim() }
+    }
+}
+
+# Resolves the session's parameter values: explicit value > profile value > default.
+function Resolve-TtxParameters {
+    param([hashtable]$Scenario, [hashtable]$Given)
+    if ($null -eq $Given) { $Given = @{} }
+    $defs = Get-TtxScenarioParameters -Scenario $Scenario
+    $isGiven = {
+        param($name)
+        $Given.ContainsKey($name) -and $null -ne $Given[$name] -and -not [string]::IsNullOrWhiteSpace([string]$Given[$name])
+    }
+
+    $profileValues = @{}
+    $profileParam = [string]$Scenario.profileParameter
+    if ($profileParam) {
+        $profileDef = @($defs | Where-Object { $_.name -eq $profileParam }) | Select-Object -First 1
+        if ($profileDef) {
+            $profileName = $profileDef.default
+            if (& $isGiven $profileParam) { $profileName = $Given[$profileParam] }
+            $profileName = ConvertTo-TtxParameterValue -Definition $profileDef -Value $profileName
+            $profiles = Get-TtxScenarioProfiles -Scenario $Scenario
+            if ($profiles[$profileName] -is [hashtable]) { $profileValues = $profiles[$profileName] }
+        }
+    }
+
+    $resolved = @{}
+    foreach ($def in $defs) {
+        $value = $def.default
+        if ($profileValues.ContainsKey($def.name)) { $value = $profileValues[$def.name] }
+        if (& $isGiven $def.name) { $value = $Given[$def.name] }
+        $resolved[$def.name] = ConvertTo-TtxParameterValue -Definition $def -Value $value
+    }
+    return $resolved
 }
 
 function Test-TtxScenario {
@@ -132,6 +207,11 @@ function Test-TtxScenario {
         if ($seen.ContainsKey($sid)) { $errors += "Duplicate step id '$sid'." }
         $seen[$sid] = $true
         if ([string]::IsNullOrWhiteSpace([string]$step.title)) { $errors += "Step '$sid' needs a title." }
+        foreach ($dep in @($step.dependsOn | Where-Object { $null -ne $_ })) {
+            if (-not $seen.ContainsKey([string]$dep) -or [string]$dep -eq $sid) {
+                $errors += "Step '$sid' depends on '$dep', which must be an earlier step."
+            }
+        }
         $mod = [string]$step.module
         if ($mod -notmatch $script:IdPattern) { $errors += "Step '$sid' has an invalid module id." }
         elseif (-not (Test-Path -LiteralPath (Get-TtxModulePath $mod) -PathType Leaf)) {
@@ -171,6 +251,8 @@ function Get-TtxScenarioList {
             summary    = ''
             objectives = @()
             parameters = @()
+            profileParameter = ''
+            profiles   = @{}
             stepCount  = 0
             valid      = ($entry.errors.Count -eq 0)
             errors     = $entry.errors
@@ -181,6 +263,8 @@ function Get-TtxScenarioList {
             $item.summary = [string]$s.summary
             $item.objectives = @($s.objectives | Where-Object { $_ } | ForEach-Object { [string]$_ })
             $item.parameters = Get-TtxScenarioParameters -Scenario $s
+            $item.profileParameter = [string]$s.profileParameter
+            $item.profiles = Get-TtxScenarioProfiles -Scenario $s
             $item.stepCount = @($s.steps).Count
         }
         $list += , $item
@@ -200,12 +284,20 @@ function Get-TtxStepContext {
     if ($Step.params) {
         foreach ($key in @($Step.params.Keys)) { $params[$key] = $Step.params[$key] }
     }
+    # Data every step recorded, so a step (and Cleanup after a restart) can use
+    # what earlier runs created.
+    $allData = @{}
+    foreach ($st in $s.steps) {
+        if ($st.data -is [hashtable]) { $allData[$st.id] = $st.data } else { $allData[$st.id] = @{} }
+    }
     return @{
         SessionId    = $s.sessionId
         ScenarioId   = $s.scenarioId
         StepId       = $Step.id
         ArtifactRoot = $s.artifactRoot
         Parameters   = $params
+        StepData     = $allData[$Step.id]
+        AllStepData  = $allData
     }
 }
 
@@ -246,6 +338,10 @@ function Start-TtxNextJob {
     }
     $script:Ttx.JobItem = $item
     $script:Ttx.JobStarted = Get-Date
+    $script:Ttx.JobTimeoutSec = $script:Ttx.StepTimeoutSec
+    if ($step.info -and [int]$step.info.timeoutSeconds -gt $script:Ttx.JobTimeoutSec) {
+        $script:Ttx.JobTimeoutSec = [int]$step.info.timeoutSeconds
+    }
 
     $step.startedAt = (Get-Date).ToString('o')
     $step.finishedAt = $null
@@ -292,7 +388,7 @@ function Complete-TtxJob {
         if (-not $msg) { $msg = $reason }
         if (-not $msg -and $jobErrors) { $msg = ($jobErrors | ForEach-Object { $_.ToString() }) -join '; ' }
         if (-not $msg) { $msg = 'Step runner produced no result.' }
-        $result = @{ ok = $false; error = $msg; verify = $null; logs = @(); artifacts = @(); pid = $null }
+        $result = @{ ok = $false; error = $msg; verify = $null; logs = @(); artifacts = @(); pid = $null; data = $null }
     }
 
     foreach ($log in @($result.logs)) {
@@ -303,6 +399,8 @@ function Complete-TtxJob {
 
     $step.finishedAt = (Get-Date).ToString('o')
     $step.verify = $result.verify
+    # Data the module recorded (e.g. the task it created); Cleanup relies on it.
+    if ($result.data -is [hashtable]) { $step.data = $result.data }
     $step.error = $result.error
     $ok = [bool]$result.ok
 
@@ -474,23 +572,18 @@ function New-TtxSession {
     if ($entry.errors.Count -gt 0) { throw (New-TtxBadRequest ("Scenario '$ScenarioId' is invalid: " + ($entry.errors -join ' '))) }
     $scenario = $entry.scenario
 
-    # Resolve parameters: given value, else scenario default. Unknown names are ignored.
-    $resolved = @{}
-    foreach ($p in (Get-TtxScenarioParameters -Scenario $scenario)) {
-        $value = $p.default
-        if ($Parameters -and $Parameters.ContainsKey($p.name) -and -not [string]::IsNullOrWhiteSpace([string]$Parameters[$p.name])) {
-            $value = ([string]$Parameters[$p.name]).Trim()
-        }
-        $resolved[$p.name] = $value
-    }
-    $folder = [string]$resolved.ArtifactFolder
+    # Resolve parameters: explicit value > profile value > default. Unknown names are ignored.
+    $resolved = Resolve-TtxParameters -Scenario $scenario -Given $Parameters
+    $folder = ([string]$resolved.ArtifactFolder) -replace '^(%ProgramData%|\$env:ProgramData)[\\/]', ''
+    $resolved.ArtifactFolder = $folder
     if ($folder -notmatch $script:FolderPattern -or $folder -match '(^|[\\/])\.\.?([\\/]|$)') {
         throw (New-TtxBadRequest "ArtifactFolder '$folder' must be a relative folder path (letters, digits, space, . _ -) with no '..'.")
     }
     if ([string]::IsNullOrEmpty($env:ProgramData)) { throw 'The ProgramData environment variable is not set.' }
 
     $sessionId = (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
-    $artifactRoot = Join-Path (Join-Path $env:ProgramData $folder) $sessionId
+    # Files go directly in the artifact folder (D16); every file carries the run ID.
+    $artifactRoot = Join-Path $env:ProgramData $folder
 
     if ($current -and $current.status -eq 'active') {
         $current.status = 'abandoned'
@@ -502,6 +595,8 @@ function New-TtxSession {
             @{
                 id               = [string]$st.id
                 title            = [string]$st.title
+                dependsOn        = @($st.dependsOn | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+                data             = @{}
                 module           = [string]$st.module
                 params           = if ($st.params -is [hashtable]) { $st.params } else { @{} }
                 facilitatorNotes = @($st.facilitatorNotes | Where-Object { $_ } | ForEach-Object { [string]$_ })
@@ -569,6 +664,17 @@ function Get-TtxSessionView {
     }
 }
 
+# Steps this step depends on that haven't succeeded.
+function Get-TtxUnmetDependencies {
+    param([hashtable]$Step)
+    $missing = @()
+    foreach ($dep in @($Step.dependsOn)) {
+        $d = Get-TtxStep -StepId $dep
+        if ($d -and $d.status -ne 'succeeded') { $missing += , $d }
+    }
+    return , $missing
+}
+
 function Assert-TtxCanRun {
     $s = $script:Ttx.Session
     if (-not $s) { throw (New-TtxConflict 'No scenario is loaded.') }
@@ -581,6 +687,13 @@ function Start-TtxStep {
     Assert-TtxCanRun
     $step = Get-TtxStep -StepId $StepId
     if (-not $step) { throw (New-TtxNotFound "Step '$StepId' not found.") }
+    $missing = Get-TtxUnmetDependencies -Step $step
+    if ($missing.Count -gt 0) {
+        $names = ($missing | ForEach-Object { "'$($_.title)' ($($_.status))" }) -join ', '
+        $msg = "Step '$($step.title)' can't run yet: it requires $names to succeed first."
+        Add-TtxEvent -StepId $step.id -Level warn -Message $msg
+        throw (New-TtxConflict $msg)
+    }
     $step.status = 'queued'
     [void]$script:Ttx.Queue.Add(@{ stepId = $step.id; op = 'run' })
     Start-TtxNextJob
@@ -646,8 +759,8 @@ function Update-TtxEngine {
         if ($state -in 'Completed', 'Failed', 'Stopped') {
             Complete-TtxJob
         }
-        elseif (((Get-Date) - $script:Ttx.JobStarted).TotalSeconds -gt $script:Ttx.StepTimeoutSec) {
-            Complete-TtxJob -TimeoutMessage "Timed out after $($script:Ttx.StepTimeoutSec) seconds."
+        elseif (((Get-Date) - $script:Ttx.JobStarted).TotalSeconds -gt $script:Ttx.JobTimeoutSec) {
+            Complete-TtxJob -TimeoutMessage "Timed out after $($script:Ttx.JobTimeoutSec) seconds."
         }
     }
     Start-TtxNextJob

@@ -4,6 +4,20 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Added
+- Engine: typed scenario options (`string`, `choice`, `bool`) with
+  `profileParameter`/`profiles` (explicit value > profile value > default);
+  step `dependsOn`, enforced with a 409 and a warning event; per-step recorded
+  data (`Set-TtxStepData`, passed back as `Context.StepData`/`AllStepData`,
+  including to Cleanup after a restart); per-module `TimeoutSeconds`;
+  modules can declare `Tactic` and `ExpectedDetections`, and `Get-TtxHunt`
+  may return a structured hunt (lineage, Falcon events, Windows evidence,
+  queries, pivots).
+
+### Changed
+- Artifacts go directly in `%ProgramData%\<ArtifactFolder>` (no per-session
+  subfolder; `%ProgramData%\TTX-Lab` accepted) (D16).
+
 ### Fixed
 - `tests/Test-Syntax.ps1` parsed every file (CSS, HTML, Markdown) as
   PowerShell on Windows PowerShell 5.1, where `Get-ChildItem -LiteralPath`
