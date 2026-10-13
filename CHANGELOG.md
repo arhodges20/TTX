@@ -31,6 +31,14 @@ All notable changes to this project are recorded here.
   per run, on the three scheduled-task modules.
 
 ### Changed
+- Scheduled-task modules declare `Tactic` and `ExpectedDetections` and return
+  structured hunt guidance; scenario steps declare `dependsOn` so ordering is
+  enforced.
+- Docs reconciled with what was built: brief gains a "What this product is"
+  section and a scope boundary; decisions D12/D14/D15 marked proposed-not-built
+  and D18 records the scope decision; module contract and scenario format cover
+  the new metadata, hunt form, step data, typed options, profiles, and
+  `dependsOn`.
 - Artifacts go directly in `%ProgramData%\<ArtifactFolder>` (no per-session
   subfolder; `%ProgramData%\TTX-Lab` accepted) (D16).
 

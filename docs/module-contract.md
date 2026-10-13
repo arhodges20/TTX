@@ -24,23 +24,54 @@ helpers too). Target Windows PowerShell 5.1.
 | `Invoke-TtxRun -Context` | nothing (throw on failure) | Perform the step. |
 | `Test-TtxVerify -Context` | `@{ Passed = [bool]; Detail = [string] }` | Report whether the step's artifact is present. Must not change anything. |
 | `Invoke-TtxCleanup -Context` | nothing (throw on failure) | Undo the step. Must be **idempotent** and succeed even if Run never ran or only partly ran. |
-| `Get-TtxHunt -Context` | array of `@{ Title; Where; What }` | Defender hunt guidance (text only). Must not touch the system. |
+| `Get-TtxHunt -Context` | hunt guidance (simple or structured, below) | Defender hunt guidance (text only). Must not touch the system. |
 
 ### Metadata (`Get-TtxModuleInfo`)
 
 ```powershell
 @{
-    Id          = 'stub-register-scheduled-task'   # = folder name
-    Name        = 'Register scheduled task (STUB)'
+    Id          = 'register-scheduled-task'        # = folder name
+    Name        = 'Register scheduled task'
     Description = 'What the step does, in one or two sentences.'
-    Version     = '0.1.0'
-    Technique   = 'T1053.005'   # ATT&CK reference label; '' if none
+    Version     = '1.1.0'
+    Technique   = 'T1053.005'   # ATT&CK technique label; '' if none
+    Tactic      = 'Persistence' # ATT&CK tactic label; '' or 'Setup' for preconditions
     IsStub      = $false        # $true for stub modules that only write marker files
+    TimeoutSeconds = 90         # optional; overrides the engine default when larger
     Parameters  = @(
         @{ Name = 'TaskName'; Default = 'TTX-Lab-Updater'; Description = '...' }
     )
+    # Optional: detections this step is LIKELY to trigger. The facilitator
+    # records which actually fired (expected-vs-actual checklist + answer key).
+    ExpectedDetections = @(
+        @{ Id = 'scheduled-task-persistence'; Tactic = 'Persistence'; Technique = 'T1053.005'; Description = '...' }
+    )
 }
 ```
+
+`Tactic`, `TimeoutSeconds`, and `ExpectedDetections` are optional; older
+modules without them still load.
+
+### Hunt guidance (`Get-TtxHunt`)
+
+Return **either** the simple form (an array of `@{ Title; Where; What }`) or the
+**structured** form, a hashtable with any of these keys:
+
+```powershell
+@{
+    Lineage         = @('parent -> child -> ...')              # expected process tree
+    FalconEvents    = @(@{ Name = 'ProcessRollup2'; Detail = '...' })
+    WindowsEvidence = @(@{ Name = 'Security 4698'; Detail = '...' })
+    Queries         = @(@{ Title = '...'; Query = '... aid={{Aid}} ...' })
+    Pivots          = @('task -> action -> file -> who wrote it -> ...')
+}
+```
+
+Any text may contain `{{Placeholder}}` tokens that the engine fills in with
+this run's real values: `{{Host}}`, `{{User}}`, `{{Aid}}`, `{{ArtifactRoot}}`,
+`{{SessionId}}`, `{{WindowStart}}`, `{{WindowEnd}}`, and every scenario
+parameter by name (e.g. `{{TaskName}}`). The structured form feeds both the
+per-step hunt view and the generated answer key.
 
 ## The `Context` hashtable
 
@@ -49,8 +80,10 @@ helpers too). Target Windows PowerShell 5.1.
 | `SessionId` | Current session id. |
 | `ScenarioId` | Scenario id. |
 | `StepId` | Step id within the scenario. |
-| `ArtifactRoot` | Folder for this session's artifacts: `%ProgramData%\<ArtifactFolder>\<SessionId>`. Modules write **only** under here. |
-| `Parameters` | Hashtable: module defaults, overridden by scenario parameters, overridden by step `params`. |
+| `ArtifactRoot` | This session's artifact folder: `%ProgramData%\<ArtifactFolder>` (D16). Modules write **only** under here. |
+| `Parameters` | Hashtable: module defaults, overridden by scenario parameters (incl. profile), overridden by step `params`. |
+| `StepData` | Hashtable this step recorded on earlier runs (via `Set-TtxStepData`); available to Run, Verify, and Cleanup, even after a restart. |
+| `AllStepData` | Map of every step id to its recorded data, so a later step can use what an earlier step created. |
 
 ## Provided by the runner
 
@@ -63,6 +96,10 @@ module:
   records something the step created or ran on the host. The facilitator sees
   it under "Artifacts on host", and it is stored in the session state. Call it
   from `Invoke-TtxRun` for **everything** the step creates or runs.
+- `Set-TtxStepData -Key <string> -Value <any>`: records a value in this step's
+  session state (e.g. the exact task name it created). It comes back as
+  `Context.StepData` on later operations, including `Invoke-TtxCleanup` after a
+  control-center restart, so Cleanup never has to guess what to remove.
 - File helpers from `modules/_common/TtxArtifacts.ps1`. All of them refuse any
   path outside `%ProgramData%`, and names must be plain file names inside
   `Context.ArtifactRoot`:

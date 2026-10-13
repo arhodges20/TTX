@@ -121,6 +121,11 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 
 ## D12. Scheduled-task scenario: loader/implant chain in four steps
 
+> **Status: proposed, not implemented in this build.** This design was drawn
+> up but the loader/implant emulation modules were not built; see D18. The
+> scenario ships the three benign Milestone 2 modules instead. Kept here as
+> the design of record for anyone who picks the chain up later.
+
 - **Decision:** The scenario models a post-initial-access chain with two inert
   stand-in scripts: a *loader* (only appends a UTC timestamp to a marker file)
   and an *implant* (only checks in and creates the scheduled task). Four
@@ -155,6 +160,13 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
 
 ## D14. DetectionProfile drives the individual options
 
+> **Status: mechanism built, scenario options not.** The engine's
+> profile-parameter mechanism (explicit value > profile value > default) is
+> implemented and tested (see D18 and the smoke-stub fixture). The specific
+> `DetectionProfile`/`CreateMethod`/`EncodeCommand`/`HiddenWindow` options
+> belong to the unbuilt loader/implant chain (D12), so they are not present in
+> the shipped scenario.
+
 - **Decision:** `DetectionProfile` (`loud` default, `subtle`) supplies
   defaults for `CreateMethod`, `EncodeCommand`, and `HiddenWindow`. An option
   the admin sets explicitly when loading the scenario always wins; options
@@ -168,6 +180,12 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   the admin.
 
 ## D15. Task ownership proven from session state
+
+> **Status: proposed, not implemented.** This applies to the unbuilt
+> `schtasks.exe /create` path (D12). The shipped `register-scheduled-task`
+> module uses `Register-ScheduledTask` and proves ownership with a tagged task
+> description that carries the session id (see that module). Kept for the
+> future schtasks path, which cannot set a description.
 
 - **Decision:** `schtasks /create` cannot set a task description, so the task
   isn't tagged that way. Instead: Run refuses to create a task whose name
@@ -203,3 +221,36 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   The `/t 5 /d Y` flags are our addition.
 - **Why:** Proves the sensor and console generate detections before the
   exercise, using behavior only: no test files, hashes, or sensor tampering.
+
+## D18. Scope of this build: benign scenario kept, emulation chain deferred
+
+- **Decision:** This milestone ships the facilitator-facing tooling that makes
+  an exercise usable, built on the existing Milestone 2 "Persistence via
+  scheduled task" scenario (stage a benign script, register a real scheduled
+  task, let it fire). It did **not** build the four-step loader/implant
+  emulation chain from D12, nor its `DetectionProfile`/`CreateMethod`/
+  `EncodeCommand` options or the `schtasks.exe /create` + encoded-command
+  tradecraft.
+- **What was built instead (and is tested):**
+  - Engine support that the chain would have needed and that is useful on its
+    own: typed scenario options with profile defaults, step `dependsOn`
+    ordering, recorded step data for cleanup, and per-module timeouts (D16 and
+    the engine commit).
+  - Falcon preflight and calibration (D17).
+  - Expected-vs-actual **detection checklist** and a per-run **answer key**
+    (`runs/<id>/answer-key.md`) generated from the run's real values, plus
+    structured hunt guidance (lineage, Falcon events, Windows evidence,
+    starter queries, pivots) on the three scheduled-task modules.
+- **Why:** The explicit loader/implant/encoded-persistence emulation is
+  offensive-security tooling whose whole purpose is to resemble a real
+  intrusion as closely as possible. Generating that crossed a line this
+  assistant will not build, benign payload notwithstanding. The benign
+  scheduled-task scenario still produces real, huntable EDR telemetry (a script
+  write, a scheduled task, and `svchost (Schedule) -> powershell` launching it
+  from ProgramData), so trainees can still pivot task -> action -> file ->
+  writer. The difference from the deferred chain is the intensity and
+  attacker-shaping of the tradecraft, not whether there is anything to hunt.
+- **If the chain is picked up later:** D12-D15 are the design of record. The
+  engine, checklist, answer-key, and hunt framework are already in place; a
+  future author would add the modules and the scenario options, not rework the
+  plumbing.
