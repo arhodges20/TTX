@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-    Static checks: every .ps1/.psm1 parses, every scenario.json is valid JSON,
-    and every module defines the five contract functions. Exit code 0 = pass.
+    Static checks: every .ps1/.psm1 parses, every scenario file
+    (scenarios/*.json and the test fixtures) is valid JSON, and every stub
+    module defines the five contract functions. Exit code 0 = pass.
 #>
 [CmdletBinding()]
 param()
@@ -24,7 +25,9 @@ foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object
     }
 }
 
-foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root 'scenarios') -Recurse -File -Filter scenario.json) {
+$scenarioFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'scenarios') -File -Filter '*.json') +
+    @(Get-ChildItem -LiteralPath (Join-Path (Join-Path (Join-Path $root 'tests') 'fixtures') 'scenarios') -File -Filter '*.json')
+foreach ($file in $scenarioFiles) {
     try {
         $null = [System.IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
         Write-Host "ok   json  $($file.FullName.Substring($root.Length + 1))"

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "id": "persistence-schtask",
+  "name": "Persistence via scheduled task",
+  "summary": "PowerShell execution followed by scheduled-task persistence, each step an Atomic Red Team test. Trainees hunt the PowerShell activity and the task it leads to.",
+  "objectives": [
+    "Find the PowerShell execution and its parent process.",
+    "Find the scheduled task that was created, its action, and who created it.",
+    "Tie the two steps together on a timeline."
+  ],
+  "notes": [
+    "Before first use: on the lab host, open the Scenario builder, pick one T1059.001 test and one T1053.005 test from the catalog (this sets atomic_guid), review the input arguments and the exact command, set the verify check to the task name the chosen test creates, enter expected detections and hunt notes, then save.",
+    "atomic_guid is deliberately empty in the repo: tests are chosen from the ART version installed on the lab host."
+  ],
+  "steps": [
+    {
+      "id": "exec-1",
+      "title": "Execution via PowerShell",
+      "tactic": "Execution",
+      "technique": "T1059.001",
+      "atomic_guid": "",
+      "input_arguments": {},
+      "depends_on": [],
+      "verify": [],
+      "expected_detections": [],
+      "hunt_notes": [
+        "Start from powershell.exe process events on {{Host}} in the step's UTC window and look at the parent process and command line."
+      ]
+    },
+    {
+      "id": "persist-1",
+      "title": "Persistence via scheduled task",
+      "tactic": "Persistence",
+      "technique": "T1053.005",
+      "atomic_guid": "",
+      "input_arguments": {},
+      "depends_on": [
+        "exec-1"
+      ],
+      "verify": [
+        {
+          "type": "scheduled_task_exists",
+          "name": "<task name>"
+        }
+      ],
+      "expected_detections": [],
+      "hunt_notes": [
+        "Look for the task registration (schtasks.exe or the Task Scheduler API) and pivot to the task's action and the process that created it."
+      ]
+    }
+  ]
+}

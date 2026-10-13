@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "id": "smoke-stub",
+  "name": "Smoke test (stub modules)",
+  "summary": "Engine smoke test fixture. Stub modules write and remove marker files only; nothing else touches the system.",
+  "parameters": [
+    { "name": "Intensity", "type": "choice", "choices": [ "low", "high" ], "default": "low", "description": "Fixture profile switch." },
+    { "name": "Label", "type": "string", "default": "plain", "description": "Fixture option set by the profile." },
+    { "name": "Flag", "type": "bool", "default": false, "description": "Fixture boolean option." }
+  ],
+  "profileParameter": "Intensity",
+  "profiles": {
+    "low": { "Label": "quiet", "Flag": false },
+    "high": { "Label": "noisy", "Flag": true }
+  },
+  "steps": [
+    { "id": "stage", "title": "Stage (stub)", "module": "stub-stage-script", "params": {}, "depends_on": [] },
+    { "id": "register", "title": "Register (stub)", "module": "stub-register-scheduled-task", "params": {}, "depends_on": [ "stage" ] },
+    { "id": "fire", "title": "Fire (stub)", "module": "stub-task-execution", "params": {}, "depends_on": [ "register" ], "expected_detections": [ "Stub detection" ] }
+  ]
+}

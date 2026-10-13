@@ -9,6 +9,7 @@ $script:UiFiles = @{
     '/index.html' = @{ File = 'index.html'; Type = 'text/html' }
     '/app.js'     = @{ File = 'app.js'; Type = 'application/javascript' }
     '/style.css'  = @{ File = 'style.css'; Type = 'text/css' }
+    '/builder.js' = @{ File = 'builder.js'; Type = 'application/javascript' }
 }
 
 function Send-TtxResponse {
@@ -35,7 +36,7 @@ function Send-TtxJson {
 function Read-TtxRequestBody {
     param($Request)
     if (-not $Request.HasEntityBody) { return @{} }
-    if ($Request.ContentLength64 -gt 65536) { throw (New-Object System.ArgumentException 'Request body too large.') }
+    if ($Request.ContentLength64 -gt 1048576) { throw (New-Object System.ArgumentException 'Request body too large.') }
     $reader = New-Object System.IO.StreamReader($Request.InputStream, [System.Text.Encoding]::UTF8)
     try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
     if ([string]::IsNullOrWhiteSpace($text)) { return @{} }
@@ -77,8 +78,27 @@ function Invoke-TtxRequest {
             Send-TtxJson $res @{ scenarios = (Get-TtxScenarioList) }
             return
         }
+        if ($method -eq 'GET' -and $path -match '^/api/scenarios/([A-Za-z0-9_-]+)$') {
+            Send-TtxJson $res (Get-TtxScenario -Id $Matches[1])
+            return
+        }
         if ($method -eq 'GET' -and $path -eq '/api/preflight') {
-            Send-TtxJson $res (Get-TtxPreflight)
+            Send-TtxJson $res (Get-TtxHostPreflight)
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/catalog') {
+            # Pre-serialized: the list can hold over a thousand tests.
+            Send-TtxResponse -Response $res -Body (Get-TtxCatalogJson)
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/catalog/status') {
+            Send-TtxJson $res (Get-TtxCatalogStatus)
+            return
+        }
+        if ($method -eq 'GET' -and $path -match '^/api/catalog/tests/([0-9A-Fa-f-]{36})$') {
+            $t = Get-TtxCatalogTest -Guid $Matches[1]
+            if (-not $t) { Send-TtxJson $res @{ error = "Test $($Matches[1]) is not in the installed atomics." } 404; return }
+            Send-TtxJson $res $t
             return
         }
         if ($method -eq 'GET' -and $path -eq '/api/session/answer-key') {
@@ -88,8 +108,10 @@ function Invoke-TtxRequest {
         }
         if ($method -eq 'GET' -and $path -eq '/api/session') {
             $since = 0
+            $rev = -1
             [void][int]::TryParse([string]$req.QueryString['since'], [ref]$since)
-            Send-TtxJson $res (Get-TtxSessionView -Since $since)
+            if ($req.QueryString['rev']) { [void][int]::TryParse([string]$req.QueryString['rev'], [ref]$rev) }
+            Send-TtxJson $res (Get-TtxSessionView -Since $since -Revision $rev)
             return
         }
 
@@ -100,6 +122,21 @@ function Invoke-TtxRequest {
                 $params = @{}
                 if ($body.parameters -is [hashtable]) { $params = $body.parameters }
                 Send-TtxJson $res (New-TtxSession -ScenarioId ([string]$body.scenarioId) -Parameters $params)
+                return
+            }
+            if ($path -eq '/api/scenarios') {
+                Send-TtxJson $res (Save-TtxScenario -Scenario $body.scenario -Overwrite ([bool]$body.overwrite))
+                return
+            }
+            if ($path -eq '/api/catalog/rescan') {
+                Start-TtxCatalogBuild
+                Send-TtxJson $res (Get-TtxCatalogStatus)
+                return
+            }
+            if ($path -eq '/api/catalog/preview') {
+                $ia = @{}
+                if ($body.input_arguments -is [hashtable]) { $ia = $body.input_arguments }
+                Send-TtxJson $res (Get-TtxAtomicPreview -Guid ([string]$body.guid) -InputArguments $ia)
                 return
             }
             if ($path -eq '/api/session/run-all') {
@@ -120,6 +157,10 @@ function Invoke-TtxRequest {
             }
             if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/run$') {
                 Send-TtxJson $res (Start-TtxStep -StepId $Matches[1])
+                return
+            }
+            if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/getprereqs$') {
+                Send-TtxJson $res (Start-TtxGetPrereqs -StepId $Matches[1] -Confirm ($body.confirm -eq $true) -ConfirmDownload ($body.confirmDownload -eq $true))
                 return
             }
             if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/detections$') {

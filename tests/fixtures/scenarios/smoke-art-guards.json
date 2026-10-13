@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "smoke-art-guards",
+  "name": "Smoke test guardrails (mock ART)",
+  "summary": "Test fixture for the elevation block, a failing test, and a GUID that isn't installed.",
+  "steps": [
+    {
+      "id": "elev-1",
+      "title": "Needs elevation (fixture)",
+      "technique": "T9999.001",
+      "atomic_guid": "33333333-3333-4333-8333-333333333333"
+    },
+    {
+      "id": "fail-1",
+      "title": "Fails on purpose (fixture)",
+      "technique": "T9999.001",
+      "atomic_guid": "55555555-5555-4555-8555-555555555555"
+    },
+    {
+      "id": "missing-1",
+      "title": "Not installed (fixture)",
+      "technique": "T9999.001",
+      "atomic_guid": "99999999-9999-4999-8999-999999999999"
+    }
+  ]
+}
