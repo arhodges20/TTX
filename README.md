@@ -85,7 +85,10 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
    T1489, T1490, T1529, T1561) need the technique ID typed to be added.
 4. **Exercise**: load the scenario, then **Run step** or **Run all**.
    Dependency order is enforced: a step whose dependency hasn't succeeded is
-   refused with a warning, not skipped. Each step:
+   refused with a warning, not skipped. Tick **Continue past failed steps**
+   in the session header (or set it as the scenario default in the builder)
+   to let Run all keep going after a failure; dependencies then only need to
+   have been attempted. Each step:
    - checks prerequisites (`-CheckPrereqs`); if any are missing, the step
      pauses and shows the commands `-GetPrereqs` would run. They run only
      after you confirm, plus a separate download confirmation when they appear
@@ -106,6 +109,9 @@ Run it from an **elevated** PowerShell if the scenario uses tests with
 > **Trainee tip-off:** ART command lines and paths (`AtomicRedTeam`,
 > `Invoke-AtomicTest`, the atomics folder) may be visible in Falcon
 > telemetry. Hiding them is out of scope for now.
+
+**Theme:** the Theme picker in the top bar switches between System (follows
+Windows), Light and Dark; the choice is remembered in the browser.
 
 ## How it works
 
@@ -163,6 +169,7 @@ POSTs need the header `X-TTX-Request: 1` (the web UI sends it).
 | `GET /api/session?since=<n>&rev=<r>` | Session view and new events. |
 | `POST /api/session/steps/<id>/run`, `/api/session/run-all`, `/api/session/cleanup` | Run / clean up. |
 | `POST /api/session/steps/<id>/getprereqs` | `{ confirm: true, confirmDownload: true }`. |
+| `POST /api/session/options` | `{ continueOnFailure: true\|false }`. |
 | `POST /api/session/steps/<id>/detections` | `{ detectionId, result: fired\|not-fired\|unknown, notes }`. |
 | `POST /api/session/calibrate`, `/api/session/calibration` | Falcon calibration trigger and its result. |
 | `GET /api/session/answer-key` | The generated answer key (Markdown). |
@@ -273,7 +280,7 @@ count, any rows that didn't match, and what Falcon detected.
 This repo is developed in a Linux cloud environment and checked with
 PowerShell 7:
 - `tests/Test-Syntax.ps1`.
-- `tests/Invoke-SmokeTest.ps1` against the mock ART (72 checks).
+- `tests/Invoke-SmokeTest.ps1` against the mock ART (79 checks).
 - PSScriptAnalyzer's `PSUseCompatibleSyntax`, `PSUseCompatibleCommands` and
   `PSUseCompatibleTypes` rules targeting Windows PowerShell 5.1.
 - A headless-browser walkthrough of the UI against a running server.

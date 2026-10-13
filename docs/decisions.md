@@ -304,3 +304,24 @@ Notable decisions, newest last. Each entry: decision, options considered, why.
   files). D12, D14 and D15 are revised to match. D18's scope note still
   explains why the loader/implant chain was never built; D19 removes it from
   the plans altogether.
+
+## D20. Continue past failed steps (option)
+
+- **Decision:** A session option, **Continue past failed steps**, defaulting
+  from the scenario's `continue_on_failure` (off unless set) and switchable in
+  the session header. When on, Run all keeps going after a step fails or stops
+  at missing prerequisites (with a warning in the event log), and a step's
+  `depends_on` is met once the dependency has been *attempted* (succeeded,
+  failed, or stopped at prereqs) rather than only when it succeeded. Order is
+  still enforced: a step can't run before its dependencies have had their
+  turn. When off, behavior is as before: Run all stops at the first failure
+  and dependencies must succeed.
+- **Options:** Always continue; per-step "run anyway" overrides; skip failed
+  dependencies silently.
+- **Why:** Some atomics fail on a given host (e.g. an old tool that no longer
+  runs on current Windows) while the rest of the scenario is still worth
+  running, since every attempt leaves huntable telemetry. Keeping it an
+  explicit option preserves the stricter default for scenarios where a later
+  step really needs an earlier one to have worked. Cleanup is unchanged: every
+  step that ran (including failed ones) is cleaned up.
+

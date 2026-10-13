@@ -252,6 +252,33 @@ try {
     $g = (Get-TtxSessionView).session
     Check ($g.status -eq 'cleaned' -and (Get-Step 'missing-1').cleanup.status -eq 'skipped') 'cleanup skips steps that never ran'
 
+    # ---- Continue past failed steps ----
+    $view = New-TtxSession -ScenarioId 'smoke-art-continue'
+    Check ($view.session.continueOnFailure -eq $true) 'continue_on_failure from the scenario is applied to the session'
+    Set-TtxSessionOptions -ContinueOnFailure $false | Out-Null
+    Start-TtxRunAll | Out-Null
+    Wait-Idle
+    Check ((Get-Step 'fail-1').status -eq 'failed' -and (Get-Step 'after-1').status -eq 'pending') 'continue off: Run all stops at the failed step'
+    $e = Get-CaughtError { Start-TtxStep -StepId 'after-1' }
+    Check ($e -is [System.InvalidOperationException] -and $e.Message -like '*requires*') 'continue off: a step after a failed dependency is refused'
+    Set-TtxSessionOptions -ContinueOnFailure $true | Out-Null
+    Start-TtxStep -StepId 'after-1' | Out-Null
+    Wait-Idle
+    Check ((Get-Step 'after-1').status -eq 'succeeded') 'continue on: the step after a failed dependency runs'
+    Start-TtxCleanup | Out-Null
+    Wait-Idle
+    $view = New-TtxSession -ScenarioId 'smoke-art-continue'
+    Start-TtxRunAll | Out-Null
+    Wait-Idle
+    $ev = @((Get-TtxSessionView).events | Where-Object { $_.message -like '*Continuing with the next step*' })
+    Check ((Get-Step 'fail-1').status -eq 'failed' -and (Get-Step 'after-1').status -eq 'succeeded' -and $ev.Count -eq 1) 'continue on: Run all keeps going after a failure'
+    $sid = $view.session.sessionId
+    Start-TtxCleanup | Out-Null
+    Wait-Idle
+    Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'continue on: cleanup closes the session'
+    $key = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $work 'runs') $sid) 'answer-key.md') -Raw
+    Check ($key -like '*Continue past failed steps | on*') 'answer key records the continue setting'
+
     # ---- Stub module steps (engine test step type) ----
     $e = Get-CaughtError { New-TtxSession -ScenarioId 'smoke-stub' -Parameters @{ ArtifactFolder = '..\Windows' } }
     Check ($e -is [System.ArgumentException]) "ArtifactFolder '..\Windows' is rejected"

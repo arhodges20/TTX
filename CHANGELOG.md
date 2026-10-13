@@ -4,6 +4,22 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Continue past failed steps, dark mode, elevated smoke test
+
+#### Added
+- **Continue past failed steps** (D20): a session option (checkbox in the
+  session header, `POST /api/session/options`) with a scenario default
+  (`continue_on_failure`, also in the builder). When on, Run all keeps going
+  after a failed step or missing prereqs, and dependencies only need to have
+  been attempted. Recorded in the answer key.
+- **Theme picker** (System / Light / Dark) in the top bar, remembered in the
+  browser.
+
+#### Fixed
+- Smoke test failed in an elevated console: it started the elevated fixture
+  step expecting a refusal. It now runs it (and waits) when elevated, and the
+  mock `Invoke-AtomicTest` detects real elevation.
+
 ### Direction change: Atomic Red Team is the execution engine (D19)
 
 #### Added

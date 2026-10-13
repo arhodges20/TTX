@@ -287,6 +287,8 @@ function renderSession(s) {
     el('code', { class: 'param-chip' }, `${k}=${params[k]}`)));
   $('btn-run-all').disabled = !active || ui.busy;
   $('btn-cleanup').disabled = !active;
+  $('s-continue').checked = !!s.continueOnFailure;
+  $('s-continue').disabled = !active;
 
   const r = ui.readyToHunt;
   fill($('hunt-ready'), r
@@ -495,6 +497,23 @@ function appendEvents(events, total) {
   if (nearBottom) log.scrollTop = log.scrollHeight;
 }
 
+// ---------- theme ----------
+
+// System follows the OS setting; Light/Dark override it and are remembered.
+function applyTheme(choice) {
+  if (choice === 'light' || choice === 'dark') document.documentElement.setAttribute('data-theme', choice);
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('ttx-theme', choice); } catch (e) { /* storage blocked */ }
+}
+
+function initTheme() {
+  let saved = 'system';
+  try { saved = localStorage.getItem('ttx-theme') || 'system'; } catch (e) { /* storage blocked */ }
+  const sel = $('theme');
+  sel.value = ['light', 'dark'].includes(saved) ? saved : 'system';
+  sel.addEventListener('change', () => applyTheme(sel.value));
+}
+
 // ---------- polling ----------
 
 let polling = false;
@@ -521,6 +540,8 @@ async function start() {
   $('sd-edit').addEventListener('click', () => { if (window.Builder) window.Builder.open(ui.selectedScenarioId); });
   $('btn-preflight').addEventListener('click', loadPreflight);
   $('btn-run-all').addEventListener('click', () => post('/api/session/run-all'));
+  $('s-continue').addEventListener('change', (e) => post('/api/session/options', { continueOnFailure: e.target.checked }));
+  initTheme();
   $('btn-cleanup').addEventListener('click', () =>
     post('/api/session/cleanup', {}, 'Run ART cleanup for every step that ran, in reverse order? Anything running will be stopped.'));
   showView('exercise');

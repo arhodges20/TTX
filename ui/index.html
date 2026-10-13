@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TTX Control Center</title>
+  <script>
+    // Apply the saved theme before first paint (no flash). Storage may be blocked.
+    try { var t = localStorage.getItem('ttx-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -14,7 +18,16 @@
       <button class="tab" data-view="catalog" role="tab">ART catalog</button>
       <button class="tab" data-view="builder" role="tab">Scenario builder</button>
     </nav>
-    <span id="conn" class="conn conn-wait" title="Connection to the local server">connecting...</span>
+    <div class="topbar-right">
+      <label class="theme-pick">Theme
+        <select id="theme" aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <span id="conn" class="conn conn-wait" title="Connection to the local server">connecting...</span>
+    </div>
   </header>
 
   <div id="banner" class="banner" hidden></div>
@@ -63,6 +76,9 @@
             </div>
             <div class="meta" id="s-art"></div>
             <div class="meta" id="s-params-row">Parameters: <span id="s-params"></span></div>
+            <label class="check session-option" title="When on, Run all keeps going after a step fails, and a step whose dependency failed can still run (order is kept).">
+              <input type="checkbox" id="s-continue"> Continue past failed steps
+            </label>
           </div>
           <div class="actions">
             <button id="btn-run-all" class="btn btn-primary">Run all</button>
@@ -129,6 +145,7 @@
         <label>Name <input id="b-name" placeholder="Scenario name"></label>
         <label class="wide">Summary <input id="b-summary"></label>
         <label class="wide">Objectives (one per line) <textarea id="b-objectives" rows="3"></textarea></label>
+        <label class="check wide"><span><input type="checkbox" id="b-continue"> Continue past failed steps by default (Run all keeps going after a failure; can be changed per session)</span></label>
       </div>
       <div id="b-notes" class="meta"></div>
       <ol id="b-steps" class="steps"></ol>
