@@ -4,6 +4,12 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+- Scenario warnings said "the ART catalog isn't loaded" while the catalog was
+  still being built on first start, and stayed until the page was reloaded.
+  The message now says the catalog is still being built, and the scenario
+  list refreshes by itself when the build finishes.
+
 ### Built-in scenarios, continue past failed steps, dark mode, elevated smoke test
 
 #### Added
