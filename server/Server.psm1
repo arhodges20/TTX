@@ -77,6 +77,10 @@ function Invoke-TtxRequest {
             Send-TtxJson $res @{ scenarios = (Get-TtxScenarioList) }
             return
         }
+        if ($method -eq 'GET' -and $path -eq '/api/preflight') {
+            Send-TtxJson $res (Get-TtxPreflight)
+            return
+        }
         if ($method -eq 'GET' -and $path -eq '/api/session') {
             $since = 0
             [void][int]::TryParse([string]$req.QueryString['since'], [ref]$since)
@@ -95,6 +99,14 @@ function Invoke-TtxRequest {
             }
             if ($path -eq '/api/session/run-all') {
                 Send-TtxJson $res (Start-TtxRunAll)
+                return
+            }
+            if ($path -eq '/api/session/calibrate') {
+                Send-TtxJson $res (Invoke-TtxCalibration)
+                return
+            }
+            if ($path -eq '/api/session/calibration') {
+                Send-TtxJson $res (Set-TtxCalibrationResult -Result ([string]$body.result) -Notes ([string]$body.notes))
                 return
             }
             if ($path -eq '/api/session/cleanup') {

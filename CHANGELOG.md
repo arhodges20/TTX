@@ -14,6 +14,13 @@ All notable changes to this project are recorded here.
   may return a structured hunt (lineage, Falcon events, Windows evidence,
   queries, pivots).
 
+- Falcon preflight (`server/Preflight.ps1`): at session load records host,
+  user, elevation, UTC time, `CSFalconService` status, and the sensor AID;
+  warns (never blocks) if the sensor isn't running. `GET /api/preflight`.
+- Calibration check: `POST /api/session/calibrate` starts
+  `choice /m crowdstrike_sample_detection /t 5 /d Y`;
+  `POST /api/session/calibration` records whether it fired (D17).
+
 ### Changed
 - Artifacts go directly in `%ProgramData%\<ArtifactFolder>` (no per-session
   subfolder; `%ProgramData%\TTX-Lab` accepted) (D16).

@@ -7,6 +7,7 @@
 # writer of runs/<sessionId>/state.json and events.jsonl.
 
 . (Join-Path $PSScriptRoot 'TtxCommon.ps1')
+. (Join-Path $PSScriptRoot 'Preflight.ps1')
 
 $script:Ttx = @{
     Root           = $null
@@ -628,11 +629,16 @@ function New-TtxSession {
         status          = 'active'
         parameters      = $resolved
         artifactRoot    = $artifactRoot
+        preflight       = (Get-TtxPreflight)
+        calibration     = $null
         steps           = $steps
     }
     New-Item -ItemType Directory -Path (Get-TtxSessionDir) -Force | Out-Null
     Save-TtxSession
     Add-TtxEvent -Message "Session $sessionId created for scenario '$($scenario.name)'. Artifacts go to $artifactRoot"
+    $pf = $script:Ttx.Session.preflight
+    Add-TtxEvent -Message "Preflight: host $($pf.host), user $($pf.user), elevated $($pf.elevated), Falcon sensor $($pf.falconService), AID $(if ($pf.aid) { $pf.aid } else { 'unknown' })."
+    foreach ($w in @($pf.warnings)) { Add-TtxEvent -Level warn -Message $w }
 
     foreach ($step in $steps) {
         $d = Invoke-TtxDescribe -Step $step
@@ -751,6 +757,31 @@ function Stop-TtxCurrentJob {
     Add-TtxEvent -StepId $step.id -Level warn -Message "Interrupted. $Reason"
 }
 
+# Runs CrowdStrike's benign test-detection trigger (D17) and records it in the
+# session so the facilitator can mark whether it showed up in Falcon.
+function Invoke-TtxCalibration {
+    $s = $script:Ttx.Session
+    if (-not $s -or $s.status -ne 'active') { throw (New-TtxConflict 'Load a scenario first; calibration is recorded in the session.') }
+    try { $cal = Start-TtxFalconCalibration }
+    catch { throw (New-TtxConflict "Could not start the calibration trigger: $($_.Exception.Message)") }
+    $s.calibration = $cal
+    Add-TtxEvent -Message "Calibration: started '$($cal.commandLine)' (PID $($cal.pid)). Check Falcon for a test detection in a few minutes, then mark the result."
+    Save-TtxSession
+    return (Get-TtxSessionView)
+}
+
+function Set-TtxCalibrationResult {
+    param([string]$Result, [string]$Notes)
+    $s = $script:Ttx.Session
+    if (-not $s -or -not $s.calibration) { throw (New-TtxConflict 'Run the calibration check first.') }
+    if ($Result -notin 'fired', 'not-fired', 'unknown') { throw (New-TtxBadRequest 'result must be fired, not-fired, or unknown.') }
+    $s.calibration.result = $Result
+    $s.calibration.notes = [string]$Notes
+    Add-TtxEvent -Message "Calibration result marked: $Result."
+    Save-TtxSession
+    return (Get-TtxSessionView)
+}
+
 # Called from the server loop: collects a finished job, enforces the timeout,
 # and starts the next queued operation.
 function Update-TtxEngine {
@@ -783,4 +814,5 @@ function Stop-TtxEngine {
 
 Export-ModuleMember -Function Initialize-TtxEngine, Get-TtxScenarioList, New-TtxSession, Get-TtxSessionView,
     Start-TtxStep, Start-TtxRunAll, Start-TtxCleanup, Update-TtxEngine, Stop-TtxEngine,
+    Get-TtxPreflight, Invoke-TtxCalibration, Set-TtxCalibrationResult,
     ConvertFrom-TtxJson, ConvertTo-TtxJson

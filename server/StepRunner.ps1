@@ -87,6 +87,7 @@ $result = @{
 
 try {
     . (Join-Path $PSScriptRoot 'TtxCommon.ps1')
+    . (Join-Path $PSScriptRoot 'Preflight.ps1')
     . (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules') '_common') 'TtxArtifacts.ps1')
 
     $context = ConvertFrom-TtxJson -Json $ContextJson
