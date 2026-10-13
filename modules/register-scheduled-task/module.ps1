@@ -7,13 +7,17 @@ function Get-TtxModuleInfo {
         Id          = 'register-scheduled-task'
         Name        = 'Register scheduled task'
         Description = 'Registers a scheduled task (logon trigger, current user) whose action runs the stand-in script with powershell.exe.'
-        Version     = '1.0.0'
+        Version     = '1.1.0'
         Technique   = 'T1053.005'
+        Tactic      = 'Persistence'
         IsStub      = $false
         Parameters  = @(
             @{ Name = 'ScriptName'; Default = 'updater.ps1'; Description = 'Script the task runs (from the stage step).' },
             @{ Name = 'TaskName'; Default = 'TTX-Lab-Updater'; Description = 'Name of the scheduled task.' },
             @{ Name = 'TaskPath'; Default = '\'; Description = 'Task Scheduler folder for the task.' }
+        )
+        ExpectedDetections = @(
+            @{ Id = 'scheduled-task-persistence'; Tactic = 'Persistence'; Technique = 'T1053.005'; Description = 'Scheduled task created for persistence (logon trigger running PowerShell from ProgramData)' }
         )
     }
 }
@@ -110,21 +114,25 @@ function Invoke-TtxCleanup {
 
 function Get-TtxHunt {
     param([hashtable]$Context)
-    @(
-        @{
-            Title = 'Task registration'
-            Where = 'Falcon: ScheduledTaskRegistered events. Windows: Security 4698 (needs "Audit Other Object Access Events"), TaskScheduler/Operational 106'
-            What  = 'A new task registered by a user, with a logon trigger, whose action runs powershell.exe with -WindowStyle Hidden -File pointing into C:\ProgramData.'
-        },
-        @{
-            Title = 'Task definition on disk'
-            Where = 'C:\Windows\System32\Tasks and HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache'
-            What  = 'The task XML: author, trigger, and the exact command line it runs.'
-        },
-        @{
-            Title = 'Registering process'
-            Where = 'Falcon process tree (ProcessRollup2) around the registration time'
-            What  = 'Which powershell.exe registered the task, its parent, and the user.'
-        }
-    )
+    @{
+        Lineage = @(
+            'powershell.exe (TTX job) -> powershell.exe (Register-ScheduledTask) registers the task',
+            'The registered action: powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {{ArtifactRoot}}\{{ScriptName}}'
+        )
+        FalconEvents = @(
+            @{ Name = 'ScheduledTaskRegistered'; Detail = 'New task {{TaskName}} with a logon trigger; confirm in your tenant.' },
+            @{ Name = 'ProcessRollup2'; Detail = 'The powershell.exe that registered the task, its parent and user.' }
+        )
+        WindowsEvidence = @(
+            @{ Name = 'Security 4698'; Detail = 'Task created (needs "Audit Other Object Access Events").' },
+            @{ Name = 'TaskScheduler/Operational 106'; Detail = 'Task registered.' },
+            @{ Name = 'Task XML'; Detail = 'C:\Windows\System32\Tasks\{{TaskName}} - author, trigger, exact command line.' }
+        )
+        Queries = @(
+            @{ Title = 'Task registration on this host'; Query = '#event_simpleName=ScheduledTaskRegistered aid={{Aid}} TaskName=/{{TaskName}}/i' }
+        )
+        Pivots = @(
+            'From the task action, find the script path {{ArtifactRoot}}\{{ScriptName}}, then who wrote it (stage step), then how that process got there.'
+        )
+    }
 }

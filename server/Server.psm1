@@ -81,6 +81,11 @@ function Invoke-TtxRequest {
             Send-TtxJson $res (Get-TtxPreflight)
             return
         }
+        if ($method -eq 'GET' -and $path -eq '/api/session/answer-key') {
+            $key = Get-TtxAnswerKey
+            Send-TtxResponse -Response $res -ContentType 'text/markdown' -Body $key.markdown
+            return
+        }
         if ($method -eq 'GET' -and $path -eq '/api/session') {
             $since = 0
             [void][int]::TryParse([string]$req.QueryString['since'], [ref]$since)
@@ -115,6 +120,10 @@ function Invoke-TtxRequest {
             }
             if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/run$') {
                 Send-TtxJson $res (Start-TtxStep -StepId $Matches[1])
+                return
+            }
+            if ($path -match '^/api/session/steps/([A-Za-z0-9_-]+)/detections$') {
+                Send-TtxJson $res (Set-TtxDetectionResult -StepId $Matches[1] -DetectionId ([string]$body.detectionId) -Result ([string]$body.result) -Notes ([string]$body.notes))
                 return
             }
         }

@@ -435,6 +435,7 @@ function Complete-TtxJob {
         if (-not $moreCleanup) { Complete-TtxCleanup }
     }
     Save-TtxSession
+    Write-TtxAnswerKey
 }
 
 # Drops queued 'run' items (e.g. Run all after a failure) and resets their steps.
@@ -607,6 +608,7 @@ function New-TtxSession {
                 status           = 'pending'
                 touched          = $false
                 artifacts        = @()
+                detections       = @{}
                 runnerPid        = $null
                 lastOp           = $null
                 verify           = $null
@@ -652,6 +654,7 @@ function New-TtxSession {
         }
     }
     Save-TtxSession
+    Write-TtxAnswerKey
     return (Get-TtxSessionView)
 }
 
@@ -661,10 +664,27 @@ function Get-TtxSessionView {
     if ($Since -lt 0 -or $Since -gt $count) { $Since = 0 }
     $current = $null
     if ($script:Ttx.JobItem) { $current = $script:Ttx.JobItem }
+
+    # Computed per-step facts the UI needs but that aren't stored in state.json:
+    # the detection checklist rows (expected merged with recorded) and the
+    # unmet dependencies that currently block the step's Run button.
+    $extras = @{}
+    if ($script:Ttx.Session) {
+        foreach ($step in $script:Ttx.Session.steps) {
+            $blockedBy = @(Get-TtxUnmetDependencies -Step $step | ForEach-Object { @{ id = $_.id; title = $_.title; status = $_.status } })
+            $extras[$step.id] = @{
+                detections = (Get-TtxStepDetectionRows -Step $step)
+                blockedBy  = $blockedBy
+                runValues  = $null
+            }
+        }
+    }
     return @{
         session    = $script:Ttx.Session
         busy       = (Test-TtxBusy)
         current    = $current
+        stepExtras = $extras
+        runValues  = if ($script:Ttx.Session) { Get-TtxRunValues } else { @{} }
         eventCount = $count
         events     = @($script:Ttx.Events.GetRange($Since, $count - $Since))
     }
@@ -782,6 +802,219 @@ function Set-TtxCalibrationResult {
     return (Get-TtxSessionView)
 }
 
+#endregion
+
+#region Detection checklist and answer key
+
+# Records which of a step's expected detections the facilitator actually saw in
+# the EDR. The checklist is keyed by the expected-detection id a module declared;
+# a facilitator can also add ad-hoc rows (id starting with 'custom:').
+function Set-TtxDetectionResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$StepId,
+        [Parameter(Mandatory = $true)][string]$DetectionId,
+        [Parameter(Mandatory = $true)][string]$Result,
+        [string]$Notes
+    )
+    $s = $script:Ttx.Session
+    if (-not $s) { throw (New-TtxConflict 'No scenario is loaded.') }
+    $step = Get-TtxStep -StepId $StepId
+    if (-not $step) { throw (New-TtxNotFound "Step '$StepId' not found.") }
+    if ($Result -notin 'fired', 'not-fired', 'unknown') { throw (New-TtxBadRequest 'result must be fired, not-fired, or unknown.') }
+    if ([string]::IsNullOrWhiteSpace($DetectionId)) { throw (New-TtxBadRequest 'detectionId is required.') }
+
+    if ($step.detections -isnot [hashtable]) { $step.detections = @{} }
+    $step.detections[$DetectionId] = @{
+        result    = $Result
+        notes     = [string]$Notes
+        markedAt  = (Get-Date).ToString('o')
+    }
+    Add-TtxEvent -StepId $step.id -Message "Detection '$DetectionId' marked $Result."
+    Save-TtxSession
+    Write-TtxAnswerKey
+    return (Get-TtxSessionView)
+}
+
+# Expected detections for a step, merged with whatever the facilitator recorded.
+function Get-TtxStepDetectionRows {
+    param([hashtable]$Step)
+    $rows = @()
+    $recorded = @{}
+    if ($Step.detections -is [hashtable]) { $recorded = $Step.detections }
+    $expected = @()
+    if ($Step.info -and $Step.info.expectedDetections) { $expected = @($Step.info.expectedDetections) }
+
+    foreach ($d in $expected) {
+        if ($null -eq $d) { continue }
+        $id = [string]$d.id
+        $mark = $recorded[$id]
+        $rows += , @{
+            id          = $id
+            tactic      = [string]$d.tactic
+            technique   = [string]$d.technique
+            description = [string]$d.description
+            expected    = $true
+            result      = if ($mark) { [string]$mark.result } else { 'unknown' }
+            notes       = if ($mark) { [string]$mark.notes } else { '' }
+        }
+    }
+    # Ad-hoc rows the facilitator added that aren't in the module's expected list.
+    foreach ($id in @($recorded.Keys)) {
+        if (@($expected | Where-Object { [string]$_.id -eq $id }).Count -gt 0) { continue }
+        $mark = $recorded[$id]
+        $rows += , @{
+            id          = $id
+            tactic      = ''
+            technique   = ''
+            description = '(added by facilitator)'
+            expected    = $false
+            result      = [string]$mark.result
+            notes       = [string]$mark.notes
+        }
+    }
+    return , $rows
+}
+
+# Fills {{Placeholder}} tokens in hunt text with this run's real values.
+function Expand-TtxPlaceholders {
+    param([string]$Text, [hashtable]$Values)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $out = $Text
+    foreach ($key in @($Values.Keys)) {
+        $out = $out.Replace("{{$key}}", [string]$Values[$key])
+    }
+    return $out
+}
+
+# Values available to hunt text and the answer key for this run.
+function Get-TtxRunValues {
+    $s = $script:Ttx.Session
+    $pf = $s.preflight
+    $start = $s.createdAt
+    $end = $s.updatedAt
+    $values = @{
+        Host         = [string]$pf.host
+        User         = [string]$pf.user
+        Aid          = if ($pf.aid) { [string]$pf.aid } else { '<AID unknown>' }
+        ArtifactRoot = [string]$s.artifactRoot
+        SessionId    = [string]$s.sessionId
+        WindowStart  = [string]$start
+        WindowEnd    = [string]$end
+    }
+    foreach ($key in @($s.parameters.Keys)) { $values[$key] = [string]$s.parameters[$key] }
+    return $values
+}
+
+# Writes runs/<id>/answer-key.md, filled in with this run's real values.
+function Write-TtxAnswerKey {
+    $s = $script:Ttx.Session
+    if (-not $s) { return }
+    $v = Get-TtxRunValues
+    $pf = $s.preflight
+    $nl = [Environment]::NewLine
+    $sb = New-Object System.Text.StringBuilder
+
+    [void]$sb.AppendLine("# Answer key - $($s.scenarioName)")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("Facilitator reference for this run. Generated by TTX Control Center; EDR")
+    [void]$sb.AppendLine("event names and detections are marked ""confirm in your tenant"".")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| | |")
+    [void]$sb.AppendLine("|---|---|")
+    [void]$sb.AppendLine("| Session | ``$($s.sessionId)`` |")
+    [void]$sb.AppendLine("| Host | ``$($v.Host)`` |")
+    [void]$sb.AppendLine("| User | ``$($v.User)`` |")
+    [void]$sb.AppendLine("| Falcon AID | ``$($v.Aid)`` |")
+    [void]$sb.AppendLine("| Sensor | $($pf.falconService) |")
+    [void]$sb.AppendLine("| Artifact folder | ``$($v.ArtifactRoot)`` |")
+    [void]$sb.AppendLine("| Time window (UTC) | $($v.WindowStart) to $($v.WindowEnd) |")
+    [void]$sb.AppendLine()
+    if ($s.calibration) {
+        [void]$sb.AppendLine("Calibration: ``$($s.calibration.commandLine)`` -> result **$($s.calibration.result)**.")
+        [void]$sb.AppendLine()
+    }
+
+    $i = 0
+    foreach ($step in $s.steps) {
+        $i++
+        [void]$sb.AppendLine("## Step $i. $($step.title)")
+        [void]$sb.AppendLine()
+        $tech = if ($step.info) { [string]$step.info.technique } else { '' }
+        $tac = if ($step.info) { [string]$step.info.tactic } else { '' }
+        if ($tac -or $tech) { [void]$sb.AppendLine("ATT&CK: $tac $tech".Trim()); [void]$sb.AppendLine() }
+        [void]$sb.AppendLine("Status: **$($step.status)**.")
+        [void]$sb.AppendLine()
+
+        if (@($step.artifacts).Count -gt 0) {
+            [void]$sb.AppendLine("Artifacts on host:")
+            foreach ($a in @($step.artifacts)) {
+                [void]$sb.AppendLine("- **$($a.type)** ``$($a.location)``$(if ($a.detail) { " - $($a.detail)" })")
+            }
+            if ($step.runnerPid) { [void]$sb.AppendLine("- Ran in powershell.exe PID $($step.runnerPid).") }
+            [void]$sb.AppendLine()
+        }
+
+        $hunt = $step.hunt
+        if ($hunt) {
+            if (@($hunt.lineage).Count -gt 0) {
+                [void]$sb.AppendLine("Expected process lineage:")
+                foreach ($l in @($hunt.lineage)) { [void]$sb.AppendLine("- $(Expand-TtxPlaceholders $l $v)") }
+                [void]$sb.AppendLine()
+            }
+            if (@($hunt.falconEvents).Count -gt 0) {
+                [void]$sb.AppendLine("Expected Falcon events (confirm in your tenant):")
+                foreach ($e in @($hunt.falconEvents)) { [void]$sb.AppendLine("- **$($e.name)** - $(Expand-TtxPlaceholders $e.detail $v)") }
+                [void]$sb.AppendLine()
+            }
+            if (@($hunt.windowsEvidence).Count -gt 0) {
+                [void]$sb.AppendLine("Windows-side evidence:")
+                foreach ($e in @($hunt.windowsEvidence)) { [void]$sb.AppendLine("- **$($e.name)** - $(Expand-TtxPlaceholders $e.detail $v)") }
+                [void]$sb.AppendLine()
+            }
+            if (@($hunt.queries).Count -gt 0) {
+                [void]$sb.AppendLine("Starter Falcon Event Search queries (validate against your tenant):")
+                foreach ($q in @($hunt.queries)) {
+                    [void]$sb.AppendLine("- $($q.title):")
+                    [void]$sb.AppendLine('  ```')
+                    [void]$sb.AppendLine('  ' + (Expand-TtxPlaceholders $q.query $v))
+                    [void]$sb.AppendLine('  ```')
+                }
+                [void]$sb.AppendLine()
+            }
+            if (@($hunt.pivots).Count -gt 0) {
+                [void]$sb.AppendLine("Pivot path for trainees:")
+                foreach ($p in @($hunt.pivots)) { [void]$sb.AppendLine("- $(Expand-TtxPlaceholders $p $v)") }
+                [void]$sb.AppendLine()
+            }
+        }
+
+        $rows = Get-TtxStepDetectionRows -Step $step
+        if (@($rows).Count -gt 0) {
+            [void]$sb.AppendLine("Detections (expected vs. actual):")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("| Detection | Tactic / Technique | Result | Notes |")
+            [void]$sb.AppendLine("|---|---|---|---|")
+            foreach ($r in $rows) {
+                [void]$sb.AppendLine("| $($r.description) | $("$($r.tactic) $($r.technique)".Trim()) | $($r.result) | $($r.notes) |")
+            }
+            [void]$sb.AppendLine()
+        }
+    }
+
+    [void]$sb.AppendLine("---")
+    [void]$sb.AppendLine("_Telemetry can take a few minutes to appear in Falcon. Generated $((Get-Date).ToUniversalTime().ToString('o'))._")
+
+    Write-TtxTextFile -Path (Join-Path (Get-TtxSessionDir) 'answer-key.md') -Text ($sb.ToString())
+}
+
+function Get-TtxAnswerKey {
+    $s = $script:Ttx.Session
+    if (-not $s) { throw (New-TtxConflict 'No scenario is loaded.') }
+    $path = Join-Path (Get-TtxSessionDir) 'answer-key.md'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { Write-TtxAnswerKey }
+    return @{ path = $path; markdown = (Read-TtxTextFile -Path $path) }
+}
+
 # Called from the server loop: collects a finished job, enforces the timeout,
 # and starts the next queued operation.
 function Update-TtxEngine {
@@ -815,4 +1048,5 @@ function Stop-TtxEngine {
 Export-ModuleMember -Function Initialize-TtxEngine, Get-TtxScenarioList, New-TtxSession, Get-TtxSessionView,
     Start-TtxStep, Start-TtxRunAll, Start-TtxCleanup, Update-TtxEngine, Stop-TtxEngine,
     Get-TtxPreflight, Invoke-TtxCalibration, Set-TtxCalibrationResult,
+    Set-TtxDetectionResult, Get-TtxAnswerKey,
     ConvertFrom-TtxJson, ConvertTo-TtxJson

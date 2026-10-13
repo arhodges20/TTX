@@ -6,14 +6,19 @@ function Get-TtxModuleInfo {
         Id          = 'run-scheduled-task'
         Name        = 'Scheduled task runs'
         Description = 'Starts the scheduled task now (as a logon would). The Task Scheduler launches powershell.exe, which runs the stand-in script; the script appends a line to its log file.'
-        Version     = '1.0.0'
+        Version     = '1.1.0'
         Technique   = 'T1053.005'
+        Tactic      = 'Execution'
         IsStub      = $false
+        TimeoutSeconds = 90
         Parameters  = @(
             @{ Name = 'ScriptName'; Default = 'updater.ps1'; Description = 'Script the task runs.' },
             @{ Name = 'TaskName'; Default = 'TTX-Lab-Updater'; Description = 'Name of the scheduled task.' },
             @{ Name = 'TaskPath'; Default = '\'; Description = 'Task Scheduler folder for the task.' },
             @{ Name = 'WaitSeconds'; Default = 30; Description = 'How long to wait for the script to write its log.' }
+        )
+        ExpectedDetections = @(
+            @{ Id = 'task-launched-powershell'; Tactic = 'Execution'; Technique = 'T1053.005'; Description = 'Scheduled task launches PowerShell (svchost Schedule -> powershell running a script from ProgramData)' }
         )
     }
 }
@@ -89,21 +94,23 @@ function Invoke-TtxCleanup {
 
 function Get-TtxHunt {
     param([hashtable]$Context)
-    @(
-        @{
-            Title = 'Task-launched PowerShell'
-            Where = 'Falcon process tree (ProcessRollup2): parent svchost.exe (Schedule service)'
-            What  = 'powershell.exe with -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\ProgramData\...\*.ps1, launched by the Task Scheduler rather than by a user.'
-        },
-        @{
-            Title = 'Task run history'
-            Where = 'Windows: Microsoft-Windows-TaskScheduler/Operational 100, 129, 200, 201'
-            What  = 'The task starting, the process it created, and its completion; matches the Falcon process timestamps.'
-        },
-        @{
-            Title = 'What the script did'
-            Where = 'Falcon file write telemetry; the folder the script lives in'
-            What  = 'A .log file written next to the script, by the task-launched powershell.exe.'
-        }
-    )
+    @{
+        Lineage = @(
+            'svchost.exe (Schedule service) -> powershell.exe -File {{ArtifactRoot}}\{{ScriptName}} -> writes the .log file',
+            'Parent is the Task Scheduler, not a user session - the key "launched by persistence" signal.'
+        )
+        FalconEvents = @(
+            @{ Name = 'ProcessRollup2'; Detail = 'powershell.exe with parent svchost.exe (Schedule), running a script from ProgramData.' },
+            @{ Name = 'File write'; Detail = 'The .log file written next to the script by the task-launched powershell.exe.' }
+        )
+        WindowsEvidence = @(
+            @{ Name = 'TaskScheduler/Operational 100, 129, 200, 201'; Detail = 'Task start, process created, action completed.' }
+        )
+        Queries = @(
+            @{ Title = 'Task-launched PowerShell'; Query = '#event_simpleName=ProcessRollup2 aid={{Aid}} FileName=powershell.exe ParentBaseFileName=svchost.exe CommandLine=/{{ScriptName}}/i' }
+        )
+        Pivots = @(
+            'task -> action -> loader file {{ArtifactRoot}}\{{ScriptName}} -> who wrote it -> the process that registered the task -> how did it get here? (open question for the next exercise).'
+        )
+    }
 }

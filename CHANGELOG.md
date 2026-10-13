@@ -20,6 +20,15 @@ All notable changes to this project are recorded here.
 - Calibration check: `POST /api/session/calibrate` starts
   `choice /m crowdstrike_sample_detection /t 5 /d Y`;
   `POST /api/session/calibration` records whether it fired (D17).
+- Expected-vs-actual detection checklist: modules declare `ExpectedDetections`;
+  `POST /api/session/steps/{id}/detections` records fired / not-fired / unknown
+  per detection, saved to session state.
+- Answer key: `runs/<id>/answer-key.md`, generated from this run's real values
+  (host, AID, task name, paths, UTC window) and refreshed after every step and
+  checklist change; served at `GET /api/session/answer-key`.
+- Hunt guidance upgraded to structured form (lineage, Falcon events, Windows
+  evidence, starter queries, pivots) with `{{Placeholder}}` tokens filled in
+  per run, on the three scheduled-task modules.
 
 ### Changed
 - Artifacts go directly in `%ProgramData%\<ArtifactFolder>` (no per-session
