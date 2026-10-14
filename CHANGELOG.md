@@ -4,6 +4,12 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+- Scenario builder: moving a step above the step it depended on kept the
+  now-invalid dependency, so saving failed ("must be an earlier step"). The
+  builder now drops dependencies that point down after a reorder (and says
+  which). Renaming a step id also updates the steps that depend on it.
+
 ### Steps no longer hang on prompts; Stop button (D23)
 - Steps run in a plain PowerShell process with input closed (was
   `Start-Job`), so a command that prompts fails at once instead of freezing
