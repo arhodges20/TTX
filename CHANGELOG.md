@@ -4,6 +4,14 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Steps no longer hang on prompts; Stop button (D23)
+- Steps run in a plain PowerShell process with input closed (was
+  `Start-Job`), so a command that prompts fails at once instead of freezing
+  the step and the server's shutdown.
+- **Stop** button; timeouts, Stop and Ctrl+C kill the whole process tree.
+- Faster: no CheckPrereqs call for atomics without prerequisites; no runner
+  for cleanups with nothing to do; Elastic Agent status cached.
+
 ### Docs
 - README, brief, scenario format and stub module contract rewritten shorter
   and brought up to date (ART, Elastic/Falcon, built-in scenarios). API table

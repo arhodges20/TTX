@@ -12,6 +12,14 @@ references an ART test by GUID plus input arguments.
 Tested on a Windows Server lab host with Windows PowerShell 5.1 and
 Invoke-AtomicRedTeam 2.1.0.
 
+## Screenshots
+
+| Exercise | ART catalog | Scenario builder |
+|---|---|---|
+| [![Exercise view: preflight with Elastic Agent, Elastic Defend and Sysmon; a loaded discovery scenario](docs/images/exercise.png)](docs/images/exercise.png) | [![ART catalog: search, flags, and test detail](docs/images/catalog.png)](docs/images/catalog.png) | [![Scenario builder: the built-in Persistence via Run key scenario with its first ART step](docs/images/builder.png)](docs/images/builder.png) |
+
+Taken on the lab host (Windows Server, Elastic Agent 9.5.5, ART 2.1.0).
+
 ## Requirements
 
 - Windows PowerShell 5.1 and a browser.
@@ -56,6 +64,8 @@ it's cached in `runs\catalog.json`. When upgrading to a new copy, copy
   - **Answer key** (`runs\<id>\answer-key.md`): host, agents, per-step
     command, window, verify results, hunt notes, starter searches (Kibana
     KQL, Falcon Event Search, Sysmon) and checklist results.
+- **Stop** kills the running step and every process it started (also on
+  timeout and Ctrl+C); queued steps are dropped and Cleanup still covers it.
 - **Cleanup** runs ART `-Cleanup` for every step that ran, in reverse order,
   from saved state (works after a restart), then re-checks verify.
 
@@ -107,6 +117,10 @@ are not removed by cleanup.
   test.
 - **Step failed**: open **ART output** on the step; the EDR or antivirus may
   have blocked it, or the tool may not work on this Windows build.
+- **Step stuck in RUNNING**: press **Stop**. Commands get no input, so a
+  prompt (e.g. "task already exists, replace?") fails instead of waiting;
+  check the step's ART output and clean up leftovers (e.g.
+  `schtasks /delete /tn spawn /f`).
 - **Can't load a scenario**: read "Not ready to load" under it (e.g. a
   `<placeholder>` left in a verify check).
 

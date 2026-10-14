@@ -319,6 +319,7 @@ function renderSession(s) {
     el('code', { class: 'param-chip' }, `${k}=${params[k]}`)));
   $('btn-run-all').disabled = !active || ui.busy;
   $('btn-cleanup').disabled = !active;
+  $('btn-stop').disabled = !active || !ui.busy;
   $('s-continue').checked = !!s.continueOnFailure;
   $('s-continue').disabled = !active;
 
@@ -592,6 +593,8 @@ async function start() {
   $('sd-edit').addEventListener('click', () => { if (window.Builder) window.Builder.open(ui.selectedScenarioId); });
   $('btn-preflight').addEventListener('click', loadPreflight);
   $('btn-run-all').addEventListener('click', () => post('/api/session/run-all'));
+  $('btn-stop').addEventListener('click', () =>
+    post('/api/session/stop', {}, 'Stop the running step? It and every process it started will be killed. Queued steps are dropped; Cleanup still covers what ran.'));
   $('s-continue').addEventListener('change', (e) => post('/api/session/options', { continueOnFailure: e.target.checked }));
   initTheme();
   $('btn-cleanup').addEventListener('click', () =>

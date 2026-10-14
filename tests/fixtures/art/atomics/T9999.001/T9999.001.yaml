@@ -92,3 +92,28 @@ atomic_tests:
     command: |
       Write-Output "TTX fixture failure"
       exit 3
+- name: Waits for input
+  auto_generated_guid: 66666666-6666-4666-8666-666666666666
+  description: |
+    Fixture test. Reads a line from standard input, like a command that asks
+    a yes/no question. Must finish quickly because the runner's input is closed.
+  supported_platforms:
+  - windows
+  executor:
+    name: powershell
+    elevation_required: false
+    command: |
+      $answer = [Console]::In.ReadLine()
+      Write-Output "TTX fixture got answer: [$answer]"
+- name: Runs too long
+  auto_generated_guid: 77777777-7777-4777-8777-777777777777
+  description: |
+    Fixture test. Sleeps for five minutes, like a command that never exits on
+    its own. Used to test Stop.
+  supported_platforms:
+  - windows
+  executor:
+    name: powershell
+    elevation_required: false
+    command: |
+      Start-Sleep -Seconds 300

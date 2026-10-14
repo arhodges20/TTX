@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "id": "smoke-art-hang",
+  "name": "Smoke test hangs (mock ART)",
+  "summary": "Test fixture: a step that waits for input and a step that never exits.",
+  "steps": [
+    { "id": "input-1", "title": "Waits for input (fixture)", "technique": "T9999.001", "atomic_guid": "66666666-6666-4666-8666-666666666666" },
+    { "id": "long-1", "title": "Runs too long (fixture)", "technique": "T9999.001", "atomic_guid": "77777777-7777-4777-8777-777777777777" }
+  ]
+}

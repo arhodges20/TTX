@@ -17,10 +17,14 @@
 param(
     [Parameter(Mandatory = $true)][string]$ModulePath,
     [Parameter(Mandatory = $true)][ValidateSet('describe', 'run', 'cleanup')][string]$Operation,
-    [Parameter(Mandatory = $true)][string]$ContextJson
+    [string]$ContextJson,
+    # File holding the context JSON (how the engine passes it).
+    [string]$ContextPath
 )
 
 $ErrorActionPreference = 'Stop'
+# The engine reads our result as UTF-8.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { Write-Verbose 'Console encoding not set.' }
 $TtxLogBuffer = New-Object System.Collections.ArrayList
 $TtxArtifactBuffer = New-Object System.Collections.ArrayList
 $TtxStepData = @{}
@@ -90,6 +94,7 @@ try {
     . (Join-Path $PSScriptRoot 'Preflight.ps1')
     . (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules') '_common') 'TtxArtifacts.ps1')
 
+    if ($ContextPath) { $ContextJson = [System.IO.File]::ReadAllText($ContextPath, [System.Text.Encoding]::UTF8) }
     $context = ConvertFrom-TtxJson -Json $ContextJson
     if ($null -eq $context.Parameters) { $context.Parameters = @{} }
     if ($context.StepData -isnot [hashtable]) { $context.StepData = @{} }

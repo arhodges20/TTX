@@ -61,8 +61,20 @@ function ConvertFrom-TtxElasticStatus {
 }
 
 # Asks the local Elastic Agent for its ID and version (needs an elevated
-# console). Waits at most 15 s; returns empty values if anything fails.
+# console). Waits at most 5 s; returns empty values if anything fails.
+$script:TtxElasticInfoCache = $null
+
 function Get-TtxElasticAgentInfo {
+    # Cached for 5 minutes: the call takes a few seconds and runs on the
+    # server's only thread.
+    $c = $script:TtxElasticInfoCache
+    if ($c -and ((Get-Date) - $c.at).TotalSeconds -lt 300) { return $c.info }
+    $info = Get-TtxElasticAgentInfoUncached
+    $script:TtxElasticInfoCache = @{ at = (Get-Date); info = $info }
+    return $info
+}
+
+function Get-TtxElasticAgentInfoUncached {
     $empty = @{ id = $null; version = $null; state = $null }
     if (-not (Test-Path -LiteralPath $script:TtxElasticAgentExe -PathType Leaf)) { return $empty }
     try {
@@ -75,7 +87,7 @@ function Get-TtxElasticAgentInfo {
         $psi.CreateNoWindow = $true
         $p = [System.Diagnostics.Process]::Start($psi)
         $out = $p.StandardOutput.ReadToEndAsync()
-        if (-not $p.WaitForExit(15000)) { try { $p.Kill() } catch { Write-Verbose 'elastic-agent status did not exit' }; return $empty }
+        if (-not $p.WaitForExit(5000)) { try { $p.Kill() } catch { Write-Verbose 'elastic-agent status did not exit' }; return $empty }
         $info = ConvertFrom-TtxElasticStatus -Json $out.Result
         if (-not $info.version) {
             $info.version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($script:TtxElasticAgentExe).ProductVersion

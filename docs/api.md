@@ -18,6 +18,7 @@ are refused (D10).
 | `GET /api/session?since=<n>&rev=<r>` | Session (only if changed since `rev`) and new events. |
 | `POST /api/session/steps/<id>/run` | Run one step. |
 | `POST /api/session/run-all` | Run every step not yet succeeded. |
+| `POST /api/session/stop` | Kill the running step (and its processes); drop the queue. |
 | `POST /api/session/steps/<id>/getprereqs` | `{ confirm: true, confirmDownload: true }`. |
 | `POST /api/session/options` | `{ continueOnFailure: true\|false }`. |
 | `POST /api/session/steps/<id>/detections` | `{ detectionId, result: fired\|not-fired\|unknown, notes }`. |
