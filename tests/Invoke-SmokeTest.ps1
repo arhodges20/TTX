@@ -348,6 +348,43 @@ try {
     }
     Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'Elastic session cleaned up'
 
+    # ---- Custom modules and scenario export/import (D24) ----
+    $mods = Get-TtxModuleList
+    Check (@($mods | Where-Object { $_.id -eq 'stub-stage-script' -and $_.builtIn -and $_.ok }).Count -eq 1) 'module list includes the built-in stubs'
+    Check ((Get-CaughtError { Import-TtxModule -ModuleId 'bad-mod' -Source 'function Get-TtxModuleInfo { @{} }' -Overwrite $false }) -like '*Missing function(s)*') 'import refuses a module missing contract functions'
+    Check ((Get-CaughtError { Import-TtxModule -ModuleId 'bad-parse' -Source 'function Invoke-TtxRun {' -Overwrite $false }) -is [System.ArgumentException]) 'import refuses code that does not parse'
+    Check ((Get-CaughtError { Import-TtxModule -ModuleId 'stub-stage-script' -Source 'x' -Overwrite $true }) -is [System.InvalidOperationException]) 'import refuses a built-in module id'
+    $template = Get-Content -LiteralPath (Join-Path (Join-Path $repo 'docs') 'custom-module-template.ps1') -Raw
+    $m = Import-TtxModule -ModuleId 'my-note' -Source $template -Overwrite $false
+    Check ($m.ok -and $m.info.name -eq 'Write a note file' -and -not $m.builtIn) 'template module imports and describes'
+    Check (Test-Path -LiteralPath (Join-Path (Join-Path (Join-Path $work 'custom-modules') 'my-note') 'module.ps1')) 'custom module saved under custom-modules/'
+    $custom = @{ id = 'custom-mod'; name = 'Custom module scenario'; steps = @(
+            @{ id = 'note-1'; title = 'Write note'; module = 'my-note'; params = @{ FileName = 'smoke-note.txt' } },
+            @{ id = 'echo-1'; title = 'Echo'; technique = 'T9999.001'; atomic_guid = '22222222-2222-4222-8222-222222222222'; depends_on = @('note-1') }) }
+    $null = Save-TtxScenario -Scenario $custom -Overwrite $false
+    $view = New-TtxSession -ScenarioId 'custom-mod' -Parameters @{ ArtifactFolder = 'TTX-Lab-Custom' }
+    Start-TtxRunAll | Out-Null
+    Wait-Idle
+    $noteFile = Join-Path (Join-Path $env:ProgramData 'TTX-Lab-Custom') 'smoke-note.txt'
+    Check ((Get-Step 'note-1').status -eq 'succeeded' -and (Get-Step 'echo-1').status -eq 'succeeded' -and (Test-Path -LiteralPath $noteFile)) 'custom module step and ART step run together'
+    Start-TtxCleanup | Out-Null
+    Wait-Idle
+    Check ((Get-TtxSessionView).session.status -eq 'cleaned' -and -not (Test-Path -LiteralPath $noteFile)) 'custom module cleanup removed its file'
+    $bundle = Export-TtxScenarioBundle -Id 'custom-mod'
+    Check ($bundle.ttxExport -eq 1 -and @($bundle.modules).Count -eq 1 -and $bundle.modules[0].id -eq 'my-note' -and $bundle.modules[0].source -like '*Invoke-TtxRun*' -and @($bundle.atomics).Count -eq 1) 'export bundle carries the scenario, the custom module source and the ART GUIDs'
+    # Simulate another host: remove the scenario and the module, then import the bundle.
+    Remove-Item -LiteralPath (Join-Path (Join-Path $work 'scenarios') 'custom-mod.json') -Force
+    $null = Remove-TtxCustomModule -ModuleId 'my-note'
+    $bundle = ConvertFrom-TtxJson -Json (ConvertTo-TtxJson -InputObject $bundle)
+    Check ((Get-CaughtError { Import-TtxScenarioBundle -Bundle $bundle -Overwrite $false -ImportModules $false }) -like '*custom module*confirm*') 'import with module code needs confirmation'
+    $imp = Import-TtxScenarioBundle -Bundle $bundle -Overwrite $false -ImportModules $true
+    Check ($imp.saved -and @($imp.importedModules) -contains 'my-note' -and (Get-TtxScenario -Id 'custom-mod').scenario.steps[0].module -eq 'my-note') 'confirmed import restores the scenario and its module'
+    $plain = Get-TtxScenario -Id 'smoke-art'
+    $plain.scenario.id = 'smoke-art-copy'
+    $imp2 = Import-TtxScenarioBundle -Bundle (ConvertFrom-TtxJson -Json (ConvertTo-TtxJson -InputObject $plain.scenario)) -Overwrite $false -ImportModules $false
+    Check ($imp2.saved -and $imp2.id -eq 'smoke-art-copy') 'a plain scenario file imports too'
+    Check ((Get-CaughtError { Remove-TtxCustomModule -ModuleId 'stub-stage-script' }) -is [System.InvalidOperationException]) 'built-in modules cannot be removed'
+
     # ---- Stub module steps (engine test step type) ----
     $e = Get-CaughtError { New-TtxSession -ScenarioId 'smoke-stub' -Parameters @{ ArtifactFolder = '..\Windows' } }
     Check ($e -is [System.ArgumentException]) "ArtifactFolder '..\Windows' is rejected"

@@ -7,3 +7,4 @@ runs/*
 *.swp
 Thumbs.db
 .DS_Store
+custom-modules/

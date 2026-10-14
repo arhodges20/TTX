@@ -18,7 +18,8 @@ telemetry to hunt in their EDR (CrowdStrike Falcon, Elastic, ...).
 ## Principles
 
 - **ART is the execution engine** (D19). This repo is orchestration only: no
-  atomics, attack scripts or technique logic.
+  atomics, attack scripts or technique logic. Facilitators can import their
+  own modules at runtime (D24); those live outside the repo.
 - **Every step can be cleaned up**, from saved state, even after a restart.
 - **Standard user by default.** Anything needing admin is blocked with a
   clear message unless the console is elevated.
@@ -32,5 +33,5 @@ telemetry to hunt in their EDR (CrowdStrike Falcon, Elastic, ...).
 ## Out of scope (for now)
 
 - Hiding ART paths and command lines from trainees.
-- Writing our own techniques or modifying atomics.
+- Shipping technique code in this repo, or modifying atomics.
 - Running against remote hosts.

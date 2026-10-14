@@ -115,10 +115,11 @@ function pill(status) {
 
 function showView(name) {
   ui.view = name;
-  for (const v of ['exercise', 'catalog', 'builder']) $('view-' + v).hidden = v !== name;
+  for (const v of ['exercise', 'catalog', 'builder', 'modules']) $('view-' + v).hidden = v !== name;
   for (const t of document.querySelectorAll('.tab')) t.classList.toggle('active', t.dataset.view === name);
   if (name === 'catalog' && window.Catalog) window.Catalog.show();
   if (name === 'builder' && window.Builder) window.Builder.show();
+  if (name === 'modules' && window.Modules) window.Modules.show();
 }
 
 // ---------- scenarios ----------
@@ -179,6 +180,8 @@ function selectScenario(id) {
       p.description ? el('div', { class: 'hint' }, p.description) : null);
   }));
   $('sd-load').disabled = !s.loadable;
+  $('sd-export').href = '/api/scenarios/' + encodeURIComponent(s.id) + '/export';
+  $('sd-export').hidden = !s.valid;
 }
 
 async function onLoadScenario(ev) {
@@ -511,8 +514,9 @@ function renderChecklist(st, ex) {
 function renderModuleStep(st, index, active) {
   const info = st.info || {};
   const ex = ui.extras[st.id] || {};
-  const parts = [stepHead(st, index, active, !ex.blocker, [tag('stub', 'tag-stub'), info.technique ? tag(info.technique) : null])];
-  parts.push(el('div', { class: 'step-module' }, `Stub module ${st.module}: ${info.name || ''}`));
+  const parts = [stepHead(st, index, active, !ex.blocker, [info.isStub ? tag('stub', 'tag-stub') : tag('module'), info.technique ? tag(info.technique) : null])];
+  parts.push(el('div', { class: 'step-module' }, `${info.isStub ? 'Stub module' : 'Module'} ${st.module}: ${info.name || ''}`, info.description ? ` \u00b7 ${info.description}` : ''));
+  if (ex.blocker) parts.push(el('div', { class: 'warnbox' }, ex.blocker));
   if (st.describeError) parts.push(el('div', { class: 'step-result err' }, 'Module error: ' + st.describeError));
   if (st.error) parts.push(el('div', { class: 'step-result err' }, st.error));
   else if (st.verify && st.verify.detail) parts.push(el('div', { class: 'step-result' }, 'Verify: ' + st.verify.detail));

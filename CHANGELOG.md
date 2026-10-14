@@ -4,6 +4,15 @@ All notable changes to this project are recorded here.
 
 ## [Unreleased]
 
+### Custom modules and scenario export/import (D24)
+- **Modules** tab: import your own step modules (paste or `.ps1`), checked
+  without running them; saved in `custom-modules\`. Template download.
+  Builder: **Add module step** with a parameter editor.
+- **Export** a scenario as a `.ttx.json` bundle (scenario + custom module
+  code + ART GUIDs); **Import** bundles or plain scenario files, with a code
+  review step when modules are included.
+- Modules can declare `RequiresElevation`.
+
 ### Fixed
 - Scenario builder: moving a step above the step it depended on kept the
   now-invalid dependency, so saving failed ("must be an earlier step"). The

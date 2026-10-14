@@ -132,6 +132,7 @@ try {
                 technique          = [string]$info.Technique
                 tactic             = [string]$info.Tactic
                 isStub             = [bool]$info.IsStub
+                requiresElevation  = [bool]$info.RequiresElevation
                 timeoutSeconds     = [int]$info.TimeoutSeconds
                 parameters         = @(foreach ($p in @($info.Parameters)) {
                         if ($null -ne $p) { @{ name = [string]$p.Name; default = $p.Default; description = [string]$p.Description } }
