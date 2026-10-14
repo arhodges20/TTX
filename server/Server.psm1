@@ -143,6 +143,10 @@ function Invoke-TtxRequest {
                 Send-TtxJson $res (Set-TtxSessionOptions -ContinueOnFailure ($body.continueOnFailure -eq $true))
                 return
             }
+            if ($path -eq '/api/session/stop') {
+                Send-TtxJson $res (Stop-TtxRunningStep)
+                return
+            }
             if ($path -eq '/api/session/run-all') {
                 Send-TtxJson $res (Start-TtxRunAll)
                 return

@@ -99,7 +99,7 @@ try {
     Check ($cs.status -eq 'ready' -and $cs.parser -eq 'Get-AtomicTechnique') "catalog built with the module's Get-AtomicTechnique ($($cs.count) tests)"
     $cat = ConvertFrom-TtxJson -Json (Get-TtxCatalogJson)
     $guids = @($cat.tests | ForEach-Object { $_.guid })
-    Check ($cat.tests.Count -eq 4) 'catalog: 4 Windows tests (the Linux-only test is filtered out)'
+    Check ($cat.tests.Count -eq 6) 'catalog: 6 Windows tests (the Linux-only test is filtered out)'
     Check ($guids -notcontains '44444444-4444-4444-8444-444444444444') 'catalog: Linux-only test absent'
     $t1 = Get-TtxCatalogTest -Guid '11111111-1111-4111-8111-111111111111'
     Check ($t1.techniqueId -eq 'T9999.001' -and $t1.techniqueName -eq 'TTX Fixture Technique' -and $t1.testName -eq 'Write marker file') 'catalog: technique id/name and test name'
@@ -115,7 +115,7 @@ try {
     Start-TtxCatalogBuild
     Wait-Catalog
     $cs2 = Get-TtxCatalogStatus
-    Check ($cs2.status -eq 'ready' -and $cs2.parser -eq 'powershell-yaml' -and $cs2.count -eq 4) 'catalog: powershell-yaml fallback when Get-AtomicTechnique is not exported'
+    Check ($cs2.status -eq 'ready' -and $cs2.parser -eq 'powershell-yaml' -and $cs2.count -eq 6) 'catalog: powershell-yaml fallback when Get-AtomicTechnique is not exported'
     $env:TTX_MOCK_ART_NO_GET = $savedEnv.TTX_MOCK_ART_NO_GET
 
     # ---- Scenarios: listing, validation, builder save, guardrails ----
@@ -285,6 +285,38 @@ try {
     Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'continue on: cleanup closes the session'
     $key = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $work 'runs') $sid) 'answer-key.md') -Raw
     Check ($key -like '*Continue past failed steps | on*') 'answer key records the continue setting'
+
+    # ---- Steps that prompt or never exit ----
+    # Processes whose command line contains the given text (5.1: CIM; 7: CommandLine).
+    function Get-ProcessByCommandLine {
+        param([string]$Text)
+        if ($PSVersionTable.PSVersion.Major -ge 7) { return @(Get-Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Text) }) }
+        return @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Text) })
+    }
+    $view = New-TtxSession -ScenarioId 'smoke-art-hang'
+    $t0 = Get-Date
+    Start-TtxStep -StepId 'input-1' | Out-Null
+    Wait-Idle
+    $i1 = Get-Step 'input-1'
+    $secs = ((Get-Date) - $t0).TotalSeconds
+    Check ($i1.status -eq 'succeeded' -and $i1.run.output.Contains('got answer: []') -and $secs -lt 45) ("a step that waits for input gets end-of-input and finishes ({0:n0}s)" -f $secs)
+    $sleepTag = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes("Start-Sleep -Seconds 300`n"))
+    Start-TtxStep -StepId 'long-1' | Out-Null
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-ProcessByCommandLine $sleepTag).Count -eq 0 -and (Get-Date) -lt $deadline) { Update-TtxEngine; Start-Sleep -Milliseconds 300 }
+    Check ((Get-ProcessByCommandLine $sleepTag).Count -gt 0) 'the never-exiting test is running'
+    $t0 = Get-Date
+    Stop-TtxRunningStep | Out-Null
+    $stopSecs = ((Get-Date) - $t0).TotalSeconds
+    Check (-not (Get-TtxSessionView).busy -and (Get-Step 'long-1').status -eq 'interrupted' -and (Get-Step 'long-1').executed) ("Stop ends the step at once ({0:n1}s); it stays marked as executed" -f $stopSecs)
+    Start-Sleep -Milliseconds 500
+    Check ((Get-ProcessByCommandLine $sleepTag).Count -eq 0) 'Stop killed the atomic''s child process too'
+    Check ((Get-CaughtError { Stop-TtxRunningStep }) -is [System.InvalidOperationException]) 'Stop with nothing running is refused'
+    Start-TtxCleanup | Out-Null
+    Wait-Idle
+    Check ((Get-TtxSessionView).session.status -eq 'cleaned') 'cleanup after Stop closes the session'
+    $ev = @((Get-TtxSessionView).events | Where-Object { $_.message -like 'Nothing to clean up*' })
+    Check ($ev.Count -ge 1) 'steps with nothing to clean up skip the runner'
 
     # ---- EDR-agnostic preflight: Elastic Agent + Sysmon, no Falcon ----
     # Fake the Windows services so the engine sees Elastic Agent and Sysmon

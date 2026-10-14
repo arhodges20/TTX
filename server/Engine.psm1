@@ -700,6 +700,7 @@ function Get-TtxArtContext {
         values            = $Step.values
         elevationRequired = [bool]$Step.atomic.elevationRequired
         hasCleanup        = [bool]$Step.atomic.hasCleanup
+        hasDependencies   = [bool]$Step.atomic.hasDependencies
         timeoutSeconds    = $script:Ttx.StepTimeoutSec
         executionLogPath  = (Join-Path (Get-TtxSessionDir) 'art-execution-log.csv')
         verify            = @($Step.verify)
@@ -767,6 +768,72 @@ function Get-TtxStepBlocker {
     return $null
 }
 
+# Steps run in a separate PowerShell process started with its standard input
+# closed. ART starts each atomic's command without redirecting its input, so
+# the command inherits ours: with input closed, a prompt (for example
+# schtasks asking whether to replace an existing task) reads end-of-input and
+# fails at once instead of waiting forever. Start-Job was used before; a
+# job's input is its private channel to the server, so such a prompt froze
+# the job and the server's shutdown. Holding the process also lets a timeout,
+# Stop, or shutdown kill the whole tree, including anything the atomic started.
+function Get-TtxPowerShellExe {
+    $exe = (Get-Process -Id $PID).Path
+    if ($exe) { return $exe }
+    if ($PSVersionTable.PSEdition -eq 'Core') { return 'pwsh' }
+    return 'powershell.exe'
+}
+
+function Start-TtxRunnerProcess {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath, [string[]]$Arguments)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Get-TtxPowerShellExe
+    $psi.Arguments = (@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath)) + @($Arguments)) -join ' '
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.StandardInput.Close()
+    return @{
+        process = $p
+        stdout  = $p.StandardOutput.ReadToEndAsync()
+        stderr  = $p.StandardError.ReadToEndAsync()
+    }
+}
+
+# Kills the runner and every process it started (taskkill /T on Windows).
+function Stop-TtxRunnerProcess {
+    param($Runner)
+    $p = $Runner.process
+    try { if ($p.HasExited) { return } } catch { return }
+    if ($env:OS -eq 'Windows_NT') {
+        try { & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F 2>&1 | Out-Null } catch { Write-Verbose "taskkill failed: $($_.Exception.Message)" }
+    }
+    try {
+        if (-not $p.HasExited) {
+            if ($PSVersionTable.PSVersion.Major -ge 7) { $p.Kill($true) } else { $p.Kill() }
+        }
+    }
+    catch { Write-Verbose "Kill failed: $($_.Exception.Message)" }
+    [void]$p.WaitForExit(5000)
+}
+
+# The runner's JSON result (last line of its output starting with '{').
+function Receive-TtxRunnerResult {
+    param($Runner)
+    $out = ''
+    $err = ''
+    try { if ($Runner.stdout.Wait(5000)) { $out = [string]$Runner.stdout.Result } } catch { Write-Verbose 'No runner output.' }
+    try { if ($Runner.stderr.Wait(2000)) { $err = [string]$Runner.stderr.Result } } catch { Write-Verbose 'No runner errors.' }
+    $json = @($out -split "`r?`n" | Where-Object { $_.StartsWith('{') }) | Select-Object -Last 1
+    $err = $err.Trim()
+    if ($err.Length -gt 800) { $err = $err.Substring($err.Length - 800) }
+    return @{ json = $json; stderr = $err }
+}
+
 function Start-TtxNextJob {
     if ($script:Ttx.Job -or $script:Ttx.Queue.Count -eq 0) { return }
     $item = $script:Ttx.Queue[0]
@@ -789,11 +856,10 @@ function Start-TtxNextJob {
 
     $script:Ttx.JobTimeoutSec = $script:Ttx.StepTimeoutSec
     if ($step.kind -eq 'module') {
-        $contextJson = ConvertTo-TtxJson -InputObject (Get-TtxStepContext -Step $step) -Compress
-        $script:Ttx.Job = Start-Job -ArgumentList $script:Ttx.RunnerPath, (Get-TtxModulePath $step.module), $item.op, $contextJson -ScriptBlock {
-            param($RunnerPath, $ModulePath, $Operation, $ContextJson)
-            & $RunnerPath -ModulePath $ModulePath -Operation $Operation -ContextJson $ContextJson
-        }
+        $ctxPath = Join-Path (Get-TtxSessionDir) "ctx-$($step.id)-$($item.op).json"
+        Write-TtxTextFile -Path $ctxPath -Text (ConvertTo-TtxJson -InputObject (Get-TtxStepContext -Step $step) -Compress)
+        $script:Ttx.Job = Start-TtxRunnerProcess -ScriptPath $script:Ttx.RunnerPath -Arguments @(
+            '-ModulePath', ('"{0}"' -f (Get-TtxModulePath $step.module)), '-Operation', $item.op, '-ContextPath', ('"{0}"' -f $ctxPath))
         if ($step.info -and [int]$step.info.timeoutSeconds -gt $script:Ttx.JobTimeoutSec) {
             $script:Ttx.JobTimeoutSec = [int]$step.info.timeoutSeconds
         }
@@ -804,14 +870,13 @@ function Start-TtxNextJob {
             # the answer key starts here.
             $step.run = @{ startUtc = (Get-TtxUtcNow); endUtc = $null; exitCode = $null; output = $null; command = $step.atomic.command }
         }
-        $contextJson = ConvertTo-TtxJson -InputObject (Get-TtxArtContext -Step $step) -Compress
-        $script:Ttx.Job = Start-Job -ArgumentList $script:Ttx.ArtRunnerPath, $item.op, $contextJson -ScriptBlock {
-            param($RunnerPath, $Operation, $ContextJson)
-            & $RunnerPath -Operation $Operation -ContextJson $ContextJson
-        }
-        # Module import and the prereq check add time on top of the test itself;
-        # GetPrereqs may download several files.
-        $script:Ttx.JobTimeoutSec = $script:Ttx.StepTimeoutSec + 90
+        $ctxPath = Join-Path (Get-TtxSessionDir) "ctx-$($step.id)-$($item.op).json"
+        Write-TtxTextFile -Path $ctxPath -Text (ConvertTo-TtxJson -InputObject (Get-TtxArtContext -Step $step) -Compress)
+        $script:Ttx.Job = Start-TtxRunnerProcess -ScriptPath $script:Ttx.ArtRunnerPath -Arguments @(
+            '-Operation', $item.op, '-ContextPath', ('"{0}"' -f $ctxPath))
+        # Module import adds time on top of the test's own timeout (which ART
+        # enforces); GetPrereqs may download several files.
+        $script:Ttx.JobTimeoutSec = $script:Ttx.StepTimeoutSec + 60
         if ($item.op -eq 'getprereqs') { $script:Ttx.JobTimeoutSec = ($script:Ttx.StepTimeoutSec * 4) + 90 }
     }
     $script:Ttx.JobItem = $item
@@ -844,32 +909,24 @@ function Start-TtxNextJob {
 function Complete-TtxJob {
     param([string]$TimeoutMessage)
 
-    $job = $script:Ttx.Job
+    $runner = $script:Ttx.Job
     $item = $script:Ttx.JobItem
     $step = Get-TtxStep -StepId $item.stepId
 
-    $jobErrors = $null
-    if ($TimeoutMessage) { Stop-Job -Job $job }
-    $out = @(Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable jobErrors)
-    $reason = $null
-    if ($job.State -eq 'Failed' -and $job.ChildJobs.Count -gt 0 -and $job.ChildJobs[0].JobStateInfo.Reason) {
-        $reason = $job.ChildJobs[0].JobStateInfo.Reason.Message
-    }
-    Remove-Job -Job $job -Force
+    if ($TimeoutMessage) { Stop-TtxRunnerProcess -Runner $runner }
+    $received = Receive-TtxRunnerResult -Runner $runner
     $script:Ttx.Job = $null
     $script:Ttx.JobItem = $null
     $script:Ttx.JobStarted = $null
 
     $result = $null
-    $json = $out | Where-Object { $_ -is [string] -and $_.StartsWith('{') } | Select-Object -Last 1
-    if ($json) {
-        try { $result = ConvertFrom-TtxJson -Json $json } catch { $result = $null }
+    if ($received.json) {
+        try { $result = ConvertFrom-TtxJson -Json $received.json } catch { $result = $null }
     }
     $crashed = ($null -eq $result)
     if ($crashed) {
         $msg = $TimeoutMessage
-        if (-not $msg) { $msg = $reason }
-        if (-not $msg -and $jobErrors) { $msg = ($jobErrors | ForEach-Object { $_.ToString() }) -join '; ' }
+        if (-not $msg -and $received.stderr) { $msg = "Step runner failed: $($received.stderr)" }
         if (-not $msg) { $msg = 'Step runner produced no result.' }
         $result = @{ ok = $false; error = $msg; verify = $null; logs = @(); artifacts = @(); pid = $null; data = $null }
     }
@@ -1521,6 +1578,14 @@ function Start-TtxCleanup {
             $step.cleanup = @{ status = 'skipped'; atUtc = (Get-TtxUtcNow); output = 'Never ran; nothing to clean up.'; remaining = @(); error = $null }
             continue
         }
+        # Nothing to undo and nothing to re-check: no need to start a runner.
+        $artifactChecks = @($step.verify | Where-Object { $_ -and $_.type -ne 'process_ran_since_step_start' })
+        if ($step.kind -eq 'atomic' -and $step.atomic -and -not $step.atomic.hasCleanup -and $artifactChecks.Count -eq 0) {
+            $step.status = 'cleaned'
+            $step.cleanup = @{ status = 'succeeded'; atUtc = (Get-TtxUtcNow); output = 'This atomic has no cleanup command and the step has no artifact checks; nothing to clean up.'; remaining = @(); error = $null }
+            Add-TtxEvent -StepId $step.id -Message 'Nothing to clean up (no cleanup command, no artifact checks).'
+            continue
+        }
         $step.status = 'cleanup-queued'
         $step.cleanup = @{ status = 'pending'; atUtc = $null; output = $null; remaining = @(); error = $null }
         [void]$script:Ttx.Queue.Add(@{ stepId = $step.id; op = 'cleanup' })
@@ -1538,8 +1603,7 @@ function Stop-TtxCurrentJob {
     if (-not $script:Ttx.Job) { return }
     $step = Get-TtxStep -StepId $script:Ttx.JobItem.stepId
     $op = $script:Ttx.JobItem.op
-    Stop-Job -Job $script:Ttx.Job
-    Remove-Job -Job $script:Ttx.Job -Force
+    Stop-TtxRunnerProcess -Runner $script:Ttx.Job
     $script:Ttx.Job = $null
     $script:Ttx.JobItem = $null
     $script:Ttx.JobStarted = $null
@@ -1549,6 +1613,25 @@ function Stop-TtxCurrentJob {
     if ($op -eq 'cleanup' -and $step.cleanup) { $step.cleanup.status = 'interrupted' }
     if ($op -eq 'run' -and $step.run -and -not $step.run.endUtc) { $step.run.endUtc = Get-TtxUtcNow }
     Add-TtxEvent -StepId $step.id -Level warn -Message "Interrupted. $Reason"
+}
+
+# Stop button: kills the running step (and everything it started) and drops
+# whatever was queued behind it. A stopped run counts as executed, so Cleanup
+# still covers it.
+function Stop-TtxRunningStep {
+    $s = $script:Ttx.Session
+    if (-not $s -or -not (Test-TtxBusy)) { throw (New-TtxConflict 'Nothing is running.') }
+    Stop-TtxCurrentJob -Reason 'Stopped by the facilitator; the step and every process it started were killed.'
+    foreach ($item in @($script:Ttx.Queue)) {
+        $st = Get-TtxStep -StepId $item.stepId
+        if ($st.status -eq 'queued') { $st.status = $(if ($st.prereqs -and $st.prereqs.status -eq 'missing') { 'prereqs-missing' } else { 'pending' }) }
+        elseif ($st.status -eq 'cleanup-queued') { $st.status = 'interrupted'; if ($st.cleanup) { $st.cleanup.status = 'interrupted' } }
+    }
+    if ($script:Ttx.Queue.Count -gt 0) { Add-TtxEvent -Level warn -Message "$($script:Ttx.Queue.Count) queued operation(s) dropped." }
+    $script:Ttx.Queue.Clear()
+    Save-TtxSession
+    Write-TtxAnswerKey
+    return (Get-TtxSessionView)
 }
 
 # Runs CrowdStrike's benign test-detection trigger (D17) and records it in the
@@ -1979,12 +2062,11 @@ function Get-TtxAnswerKey {
 function Update-TtxEngine {
     Update-TtxCatalogJob
     if ($script:Ttx.Job) {
-        $state = $script:Ttx.Job.State
-        if ($state -in 'Completed', 'Failed', 'Stopped') {
+        if ($script:Ttx.Job.process.HasExited) {
             Complete-TtxJob
         }
         elseif (((Get-Date) - $script:Ttx.JobStarted).TotalSeconds -gt $script:Ttx.JobTimeoutSec) {
-            Complete-TtxJob -TimeoutMessage "Timed out after $($script:Ttx.JobTimeoutSec) seconds."
+            Complete-TtxJob -TimeoutMessage "Timed out after $($script:Ttx.JobTimeoutSec) seconds; the step and every process it started were stopped."
         }
     }
     Start-TtxNextJob
@@ -2022,5 +2104,5 @@ Export-ModuleMember -Function Initialize-TtxEngine, Get-TtxScenarioList, Get-Ttx
     Get-TtxPreflight, Invoke-TtxCalibration, Set-TtxCalibrationResult,
     Set-TtxDetectionResult, Get-TtxAnswerKey,
     Get-TtxCatalogStatus, Get-TtxCatalogJson, Get-TtxCatalogTest, Get-TtxAtomicPreview, Start-TtxCatalogBuild,
-    Test-TtxCatalogBuilding, Get-TtxHostPreflight, Set-TtxSessionOptions,
+    Test-TtxCatalogBuilding, Get-TtxHostPreflight, Set-TtxSessionOptions, Stop-TtxRunningStep,
     ConvertFrom-TtxJson, ConvertTo-TtxJson

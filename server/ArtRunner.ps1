@@ -23,10 +23,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][ValidateSet('run', 'getprereqs', 'cleanup')][string]$Operation,
-    [Parameter(Mandatory = $true)][string]$ContextJson
+    [string]$ContextJson,
+    # File holding the context JSON (how the engine passes it).
+    [string]$ContextPath
 )
 
 $ErrorActionPreference = 'Stop'
+# The engine reads our result as UTF-8.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { Write-Verbose 'Console encoding not set.' }
 $MaxOutputChars = 20000
 
 $result = @{
@@ -144,6 +148,7 @@ try {
     . (Join-Path $PSScriptRoot 'Verify.ps1')
     . (Join-Path $PSScriptRoot 'Preflight.ps1')
 
+    if ($ContextPath) { $ContextJson = [System.IO.File]::ReadAllText($ContextPath, [System.Text.Encoding]::UTF8) }
     $ctx = ConvertFrom-TtxJson -Json $ContextJson
     if ($ctx.values -isnot [hashtable]) { $ctx.values = @{} }
     if ($ctx.inputArgs -isnot [hashtable]) { $ctx.inputArgs = @{} }
@@ -157,7 +162,12 @@ try {
 
     switch ($Operation) {
         'run' {
-            $result.prereqs = Get-TtxPrereqStatus -Ctx $ctx
+            # No prerequisites defined: skip the extra Invoke-AtomicTest call.
+            # (Elevation, the other thing CheckPrereqs reports, is checked above.)
+            if ($ctx.hasDependencies -eq $false) {
+                $result.prereqs = @{ status = 'met'; missing = @(); output = 'No prerequisites defined.'; checkedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }
+            }
+            else { $result.prereqs = Get-TtxPrereqStatus -Ctx $ctx }
             if ($result.prereqs.status -eq 'missing') {
                 $result.error = 'Prerequisites not met: ' + ($result.prereqs.missing -join '; ')
                 break

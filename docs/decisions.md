@@ -9,7 +9,7 @@ Older entries are kept as history; the index shows what still applies.
 | D2 | Static UI with polling | Current |
 | D3 | Scenarios are JSON | Current (flat `scenarios/<id>.json`, D19) |
 | D4, D5, D16 | Module contract, marker helpers, artifact folder | Stub test modules only |
-| D6 | Steps run in background jobs, one at a time | Current |
+| D6 | Steps run one at a time, off the server thread | Current (runner processes, D23) |
 | D7 | One active session, state saved on every change | Current |
 | D8 | Per-session artifact subfolder | Superseded by D16 |
 | D9 | Checks without a Windows host | Current |
@@ -24,6 +24,7 @@ Older entries are kept as history; the index shows what still applies.
 | D20 | Continue past failed steps | Current |
 | D21 | Built-in ready-to-run scenarios | Current |
 | D22 | EDR-agnostic preflight | Current |
+| D23 | Steps run in plain processes with input closed | Current |
 
 ## D1. Backend is Windows PowerShell 5.1 only
 
@@ -391,4 +392,21 @@ Older entries are kept as history; the index shows what still applies.
   what is there needs no configuration, and the rest of the tool (checklist,
   answer key, ready-to-hunt estimate) is already EDR-neutral. Older session
   files without agent data still read as Falcon-only.
+
+## D23. Steps run in plain processes with input closed
+
+- **Decision:** Each run, GetPrereqs and cleanup starts the runner as a
+  normal `powershell.exe` process (not `Start-Job`) with its standard input
+  closed, and passes the context in a file. Timeouts, the **Stop** button and
+  shutdown kill the runner's whole process tree (`taskkill /T`). Two
+  shortcuts skip work: no CheckPrereqs call when the atomic has no
+  prerequisites, and no runner at all for cleanups with nothing to undo or
+  re-check. The Elastic Agent status call is cached for 5 minutes.
+- **Why:** ART starts an atomic's command without redirecting its input, so
+  the command inherits the runner's. Under `Start-Job` that input is the
+  job's channel to the server: a command that prompts (e.g. `schtasks
+  /create` when the task already exists) could wait on it forever and freeze
+  the job and the server's shutdown. With input closed, a prompt gets
+  end-of-input and fails at once. Holding the process also means a stuck
+  step can always be killed, along with anything it started.
 

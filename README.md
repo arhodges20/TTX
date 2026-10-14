@@ -56,6 +56,8 @@ it's cached in `runs\catalog.json`. When upgrading to a new copy, copy
   - **Answer key** (`runs\<id>\answer-key.md`): host, agents, per-step
     command, window, verify results, hunt notes, starter searches (Kibana
     KQL, Falcon Event Search, Sysmon) and checklist results.
+- **Stop** kills the running step and every process it started (also on
+  timeout and Ctrl+C); queued steps are dropped and Cleanup still covers it.
 - **Cleanup** runs ART `-Cleanup` for every step that ran, in reverse order,
   from saved state (works after a restart), then re-checks verify.
 
@@ -107,6 +109,10 @@ are not removed by cleanup.
   test.
 - **Step failed**: open **ART output** on the step; the EDR or antivirus may
   have blocked it, or the tool may not work on this Windows build.
+- **Step stuck in RUNNING**: press **Stop**. Commands get no input, so a
+  prompt (e.g. "task already exists, replace?") fails instead of waiting;
+  check the step's ART output and clean up leftovers (e.g.
+  `schtasks /delete /tn spawn /f`).
 - **Can't load a scenario**: read "Not ready to load" under it (e.g. a
   `<placeholder>` left in a verify check).
 
