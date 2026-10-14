@@ -8,7 +8,7 @@ Older entries are kept as history; the index shows what still applies.
 | D1 | PowerShell 5.1 backend | Current |
 | D2 | Static UI with polling | Current |
 | D3 | Scenarios are JSON | Current (flat `scenarios/<id>.json`, D19) |
-| D4, D5, D16 | Module contract, marker helpers, artifact folder | Stub test modules only |
+| D4, D5, D16 | Module contract, file helpers, artifact folder | Current for module steps (stubs and custom, D24) |
 | D6 | Steps run one at a time, off the server thread | Current (runner processes, D23) |
 | D7 | One active session, state saved on every change | Current |
 | D8 | Per-session artifact subfolder | Superseded by D16 |
@@ -25,6 +25,7 @@ Older entries are kept as history; the index shows what still applies.
 | D21 | Built-in ready-to-run scenarios | Current |
 | D22 | EDR-agnostic preflight | Current |
 | D23 | Steps run in plain processes with input closed | Current |
+| D24 | Custom modules and scenario export/import | Current |
 
 ## D1. Backend is Windows PowerShell 5.1 only
 
@@ -410,3 +411,19 @@ Older entries are kept as history; the index shows what still applies.
   end-of-input and fails at once. Holding the process also means a stuck
   step can always be killed, along with anything it started.
 
+## D24. Custom modules and scenario export/import
+
+- **Decision:** Facilitators can import their own modules (the D4 contract)
+  on a Modules tab. Code is checked without running it (parses, defines the
+  five functions, at most 256 KB), saved to `custom-modules/<id>/module.ps1`
+  (gitignored), then described in a runner process; a module that fails to
+  describe isn't kept. Built-in ids can't be replaced. A module can declare
+  `RequiresElevation`. Scenarios export as a `.ttx.json` bundle holding the
+  scenario, the source of any custom modules it uses, and the ART GUIDs for
+  reference; importing a bundle with module code requires the facilitator to
+  review and confirm it.
+- **Why:** ART doesn't cover everything a facilitator wants to show, and
+  scenarios need to move between lab hosts. Custom code stays out of the
+  repo (D19 holds) and is the facilitator's own, run with the same process
+  isolation and cleanup as any step. There's no sandbox: the confirmation and
+  code review are the guard.

@@ -368,7 +368,8 @@ const Builder = {
     const testBox = el('div', { class: 'b-test' }, el('span', { class: 'muted' }, st.atomic_guid ? 'Loading test...' : 'No test chosen yet.'));
     const argsBox = el('div', { class: 'b-args' });
     const previewBox = el('div');
-    const impact = isHighImpact(st.technique);
+    const impact = !st.module && isHighImpact(st.technique);
+    const isModule = !!st.module;
 
     const card = el('li', { class: 'step b-step' },
       el('div', { class: 'step-head' },
@@ -381,14 +382,15 @@ const Builder = {
         el('label', null, 'Step id', el('input', { value: st.id, oninput: (e) => this.renameStep(st, e.target.value) })),
         el('label', null, 'Title', this.bind(el('input', { value: st.title }), st, 'title')),
         el('label', null, 'Tactic', this.bind(el('input', { value: st.tactic || '', list: 'tactics' }), st, 'tactic')),
-        el('label', null, 'Technique', el('input', { value: st.technique || '', readonly: !!st.atomic_guid, title: 'Set from the chosen test' })),
-        el('label', { class: 'wide' }, 'ART test GUID (auto_generated_guid)',
+        isModule ? el('label', null, 'Module', el('input', { value: st.module, readonly: true }))
+          : el('label', null, 'Technique', el('input', { value: st.technique || '', readonly: !!st.atomic_guid, title: 'Set from the chosen test' })),
+        isModule ? null : el('label', { class: 'wide' }, 'ART test GUID (auto_generated_guid)',
           el('div', { class: 'row' }, el('input', { value: st.atomic_guid || '', readonly: true, placeholder: 'choose from the catalog' }),
             el('button', { class: 'btn btn-small', onclick: () => { Catalog.pickFor = i; showView('catalog'); } }, 'Pick from catalog')))),
       testBox,
       impact ? el('div', { class: 'warnbox' }, `${st.technique} is destructive / high-impact. Typed confirmation: `,
         el('code', null, st.high_impact_confirmation || '(none - saving will be refused)')) : null,
-      el('h4', null, 'Input-argument overrides'), argsBox,
+      el('h4', null, isModule ? 'Module parameters' : 'Input-argument overrides'), argsBox,
       el('h4', null, 'Depends on'),
       i === 0 ? el('div', { class: 'muted' }, 'First step: nothing to depend on.') :
         el('div', { class: 'deps' }, steps.slice(0, i).map(o => el('label', { class: 'check' },
@@ -400,18 +402,101 @@ const Builder = {
               st.depends_on = steps.filter(x => set.has(x.id)).map(x => x.id);
             },
           }), ` ${o.title || o.id}`))),
-      el('h4', null, 'Verify (read-only checks after the run)'), this.renderVerify(st),
+      isModule ? el('div', { class: 'muted' }, "Verify and cleanup come from the module's own Test-TtxVerify and Invoke-TtxCleanup.")
+        : [el('h4', null, 'Verify (read-only checks after the run)'), this.renderVerify(st)],
       el('div', { class: 'b-grid' },
         el('label', { class: 'wide' }, 'Expected detections (one per line)',
           this.bind(el('textarea', { rows: 3 }, asArray(st.expected_detections).join('\n')), st, 'expected_detections', linesOf)),
         el('label', { class: 'wide' }, 'Hunt notes (one per line; {{Host}}, {{Edr}}, {{Aid}}, {{ElasticAgentId}}, {{<input arg>}} are filled in)',
           this.bind(el('textarea', { rows: 3 }, asArray(st.hunt_notes).join('\n')), st, 'hunt_notes', linesOf))),
-      el('div', { class: 'actions' }, el('button', { class: 'btn btn-small', onclick: () => this.preview(st, previewBox) }, 'Preview command with these inputs')),
+      isModule ? null : el('div', { class: 'actions' }, el('button', { class: 'btn btn-small', onclick: () => this.preview(st, previewBox) }, 'Preview command with these inputs')),
       previewBox);
 
-    if (st.atomic_guid) this.fillTest(st, testBox, argsBox);
+    if (isModule) this.fillModule(st, testBox, argsBox);
+    else if (st.atomic_guid) this.fillTest(st, testBox, argsBox);
     else fill(argsBox, el('div', { class: 'muted' }, 'Choose a test to see its input arguments.'));
     return card;
+  },
+
+  // Module step: show the module's description and edit its parameters.
+  async fillModule(st, testBox, argsBox) {
+    const m = (await Modules.list()).find(x => x.id === st.module);
+    if (!m || !m.ok) {
+      fill(testBox, el('div', { class: 'warnbox' }, `Module '${st.module}' is not installed here${m && m.error ? ': ' + m.error : ''}. Import it on the Modules tab.`));
+      fill(argsBox);
+      return;
+    }
+    const info = m.info || {};
+    fill(testBox, el('div', { class: 'step-module' }, `${m.builtIn ? 'Built-in' : 'Custom'} module `, el('strong', null, info.name || st.module),
+      info.description ? ` \u00b7 ${info.description}` : '', info.requiresElevation ? [' ', tag('elevation', 'tag-warn')] : null));
+    const defs = asArray(info.parameters);
+    if (!defs.length) { fill(argsBox, el('div', { class: 'muted' }, 'This module has no parameters.')); return; }
+    if (!st.params || typeof st.params !== 'object') st.params = {};
+    fill(argsBox, el('table', { class: 'kv' }, defs.map(p => {
+      const inp = el('input', { value: st.params[p.name] === undefined ? '' : String(st.params[p.name]), placeholder: `default: ${p.default === null ? '' : p.default}` });
+      inp.addEventListener('input', () => { if (inp.value === '') delete st.params[p.name]; else st.params[p.name] = inp.value; });
+      return el('tr', null, el('th', null, p.name), el('td', null, inp, el('div', { class: 'sub' }, p.description || '')));
+    })));
+  },
+
+  // Adds a step that runs an installed module (built-in or imported).
+  async addModuleStep() {
+    const mods = (await Modules.list()).filter(m => m.ok);
+    if (!mods.length) { showBanner('No modules installed. Import one on the Modules tab.'); return; }
+    const choice = window.prompt('Module to add (id):\n' + mods.map(m => `${m.id}  -  ${(m.info || {}).name || ''}${m.builtIn ? ' (built-in)' : ''}`).join('\n'));
+    if (choice === null) return;
+    const m = mods.find(x => x.id === choice.trim());
+    if (!m) { showBanner(`No module '${choice}'.`); return; }
+    if (!this.draft) this.newScenario();
+    const info = m.info || {};
+    const prev = this.draft.steps[this.draft.steps.length - 1];
+    this.draft.steps.push({
+      id: this.uniqueStepId(m.id), title: info.name || m.id, tactic: info.tactic || '', module: m.id, params: {},
+      depends_on: prev ? [prev.id] : [], verify: [],
+      expected_detections: asArray(info.expectedDetections).map(d => d.description).filter(Boolean), hunt_notes: [],
+    });
+    showBanner('');
+    this.render();
+  },
+
+  exportCurrent() {
+    const id = String(this.draft && this.draft.id || '').trim();
+    if (!id || !ui.scenarios.some(s => s.id === id)) { showBanner('Save the scenario before exporting it.'); return; }
+    window.location.href = '/api/scenarios/' + encodeURIComponent(id) + '/export';
+  },
+
+  // Import a .ttx.json bundle or a plain scenario file. Bundles with module
+  // code show the code first and need a tick before they are imported.
+  async importFile(file) {
+    let bundle;
+    try { bundle = JSON.parse(await file.text()); } catch (e) { showBanner('That file is not valid JSON.'); return; }
+    const scenario = bundle && bundle.ttxExport ? bundle.scenario : bundle;
+    const mods = bundle && bundle.ttxExport ? asArray(bundle.modules) : [];
+    if (!scenario || !scenario.id) { showBanner('No scenario found in that file.'); return; }
+    const exists = ui.scenarios.some(s => s.id === scenario.id);
+    const go = async () => {
+      if (exists && !window.confirm(`A scenario "${scenario.id}" already exists here. Replace it?`)) return;
+      try {
+        const r = await api('POST', '/api/scenarios/import', { bundle, overwrite: exists, importModules: mods.length > 0 });
+        showBanner('');
+        await loadScenarios();
+        this.renderOpenList();
+        await this.open(r.id);
+        Modules.invalidate();
+        fill($('b-result'), el('div', { class: 'ok' }, `Imported "${r.id}"${asArray(r.importedModules).length ? ' with module(s) ' + asArray(r.importedModules).join(', ') : ''}.`),
+          problemList('Not ready to load yet', r.incomplete, 'warn'), problemList('Warnings', r.warnings, 'warn'));
+      } catch (e) { showBanner(e.message); }
+    };
+    if (!mods.length) { await go(); return; }
+    const box = $('b-result');
+    const ok = el('input', { type: 'checkbox' });
+    const btn = el('button', { class: 'btn btn-primary', disabled: true, onclick: go }, 'Import scenario and modules');
+    ok.addEventListener('change', () => { btn.disabled = !ok.checked; });
+    fill(box, el('div', { class: 'prereq-gate' },
+      el('strong', null, `"${scenario.id}" includes ${mods.length} custom module(s). Their code runs on this host as the control-center user:`),
+      mods.map(m => el('details', null, el('summary', null, m.id), codeBlock(m.source))),
+      el('label', { class: 'check' }, ok, ' I reviewed this code and want to import it'), btn));
+    showView('builder');
   },
 
   async fillTest(st, testBox, argsBox) {
@@ -513,4 +598,8 @@ window.addEventListener('DOMContentLoaded', () => {
   $('b-new').addEventListener('click', () => { if (window.confirm('Start a new scenario? Unsaved changes are lost.')) Builder.newScenario(); });
   $('b-add').addEventListener('click', () => { Catalog.pickFor = null; showView('catalog'); });
   $('b-save').addEventListener('click', () => Builder.save());
+  $('b-add-module').addEventListener('click', () => Builder.addModuleStep());
+  $('b-export').addEventListener('click', () => Builder.exportCurrent());
+  $('b-import').addEventListener('click', () => $('b-import-file').click());
+  $('b-import-file').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) Builder.importFile(f); });
 });

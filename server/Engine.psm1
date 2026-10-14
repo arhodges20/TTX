@@ -22,6 +22,8 @@ $script:Ttx = @{
     RunsDir            = $null
     ScenariosDir       = $null
     ModulesDir         = $null
+    CustomModulesDir   = $null                                  # user-imported modules (gitignored)
+    ModuleInfoCache    = @{}                                    # module path -> @{ stamp; info }
     RunnerPath         = $null
     ArtRunnerPath      = $null
     CatalogBuilderPath = $null
@@ -309,9 +311,193 @@ function Get-TtxAtomicPreview {
 
 #region Scenarios
 
+# Built-in (stub) modules live in modules/; modules the facilitator imports
+# live in custom-modules/ (gitignored, D24). Built-in ids win.
 function Get-TtxModulePath {
     param([string]$ModuleId)
-    return (Join-Path (Join-Path $script:Ttx.ModulesDir $ModuleId) 'module.ps1')
+    $builtIn = Join-Path (Join-Path $script:Ttx.ModulesDir $ModuleId) 'module.ps1'
+    if (Test-Path -LiteralPath $builtIn -PathType Leaf) { return $builtIn }
+    return (Join-Path (Join-Path $script:Ttx.CustomModulesDir $ModuleId) 'module.ps1')
+}
+
+function Test-TtxBuiltInModule {
+    param([string]$ModuleId)
+    return (Test-Path -LiteralPath (Join-Path (Join-Path $script:Ttx.ModulesDir $ModuleId) 'module.ps1') -PathType Leaf)
+}
+
+$script:TtxModuleFunctions = @('Get-TtxModuleInfo', 'Invoke-TtxRun', 'Test-TtxVerify', 'Invoke-TtxCleanup', 'Get-TtxHunt')
+$script:TtxMaxModuleBytes = 262144
+
+# Checks module source without running it: it must parse and define the five
+# contract functions at top level. Returns a list of problems (empty = ok).
+function Test-TtxModuleSource {
+    param([string]$Source)
+    $problems = @()
+    if ([string]::IsNullOrWhiteSpace($Source)) { return , @('The module is empty.') }
+    if ([System.Text.Encoding]::UTF8.GetByteCount($Source) -gt $script:TtxMaxModuleBytes) { return , @('The module is larger than 256 KB.') }
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Source, [ref]$tokens, [ref]$parseErrors)
+    foreach ($e in @($parseErrors)) { if ($e) { $problems += "Line $($e.Extent.StartLineNumber): $($e.Message)" } }
+    if ($problems.Count -gt 0) { return , $problems }
+    $defined = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) | ForEach-Object { $_.Name })
+    $missing = @($script:TtxModuleFunctions | Where-Object { $defined -notcontains $_ })
+    if ($missing.Count -gt 0) { $problems += "Missing function(s): $($missing -join ', '). See docs/module-contract.md." }
+    return , $problems
+}
+
+# Runs the module's describe operation in a runner process (input closed,
+# like every other step, D23) and waits up to 30 s.
+function Invoke-TtxDescribeModule {
+    param([string]$ModulePath, [hashtable]$Context)
+    $ctxDir = Join-Path $script:Ttx.RunsDir 'describe'
+    if (-not (Test-Path -LiteralPath $ctxDir)) { New-Item -ItemType Directory -Path $ctxDir -Force | Out-Null }
+    $ctxPath = Join-Path $ctxDir ("ctx-{0}.json" -f [guid]::NewGuid().ToString('N'))
+    Write-TtxTextFile -Path $ctxPath -Text (ConvertTo-TtxJson -InputObject $Context -Compress)
+    try {
+        $runner = Start-TtxRunnerProcess -ScriptPath $script:Ttx.RunnerPath -Arguments @(
+            '-ModulePath', ('"{0}"' -f $ModulePath), '-Operation', 'describe', '-ContextPath', ('"{0}"' -f $ctxPath))
+        if (-not $runner.process.WaitForExit(30000)) {
+            Stop-TtxRunnerProcess -Runner $runner
+            return @{ ok = $false; error = 'Describing the module took longer than 30 seconds.' }
+        }
+        $r = Receive-TtxRunnerResult -Runner $runner
+        if (-not $r.json) { return @{ ok = $false; error = $(if ($r.stderr) { $r.stderr } else { 'Step runner produced no result.' }) } }
+        return (ConvertFrom-TtxJson -Json $r.json)
+    }
+    finally {
+        Remove-Item -LiteralPath $ctxPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Module metadata for the Modules tab and the builder, cached until the file changes.
+function Get-TtxModuleMeta {
+    param([string]$ModuleId)
+    $path = Get-TtxModulePath $ModuleId
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw (New-TtxNotFound "Module '$ModuleId' not found.") }
+    $f = Get-Item -LiteralPath $path
+    $stamp = "$($f.Length)|$($f.LastWriteTimeUtc.Ticks)"
+    $cached = $script:Ttx.ModuleInfoCache[$path]
+    if ($cached -and $cached.stamp -eq $stamp) { return $cached.info }
+    $ctx = @{ SessionId = ''; ScenarioId = ''; StepId = ''; ArtifactRoot = ''; Parameters = @{}; StepData = @{}; AllStepData = @{} }
+    $d = Invoke-TtxDescribeModule -ModulePath $path -Context $ctx
+    $info = @{ id = $ModuleId; builtIn = (Test-TtxBuiltInModule $ModuleId); ok = [bool]$d.ok; error = $d.error; info = $d.info; hunt = $d.hunt }
+    $script:Ttx.ModuleInfoCache[$path] = @{ stamp = $stamp; info = $info }
+    return $info
+}
+
+function Get-TtxModuleList {
+    $ids = @()
+    foreach ($dir in @($script:Ttx.ModulesDir, $script:Ttx.CustomModulesDir)) {
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        foreach ($d in @(Get-ChildItem -LiteralPath $dir -Directory | Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
+            if ((Test-Path -LiteralPath (Join-Path $d.FullName 'module.ps1') -PathType Leaf) -and $ids -notcontains $d.Name) { $ids += $d.Name }
+        }
+    }
+    return , @(foreach ($id in $ids) { Get-TtxModuleMeta -ModuleId $id })
+}
+
+function Get-TtxModuleSource {
+    param([string]$ModuleId)
+    if ($ModuleId -notmatch $script:IdPattern) { throw (New-TtxBadRequest 'Invalid module id.') }
+    $path = Get-TtxModulePath $ModuleId
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw (New-TtxNotFound "Module '$ModuleId' not found.") }
+    return @{ id = $ModuleId; builtIn = (Test-TtxBuiltInModule $ModuleId); source = (Read-TtxTextFile -Path $path) }
+}
+
+# Saves a facilitator's module to custom-modules/<id>/module.ps1 after
+# checking it, then describes it; a module that can't be described is removed.
+function Import-TtxModule {
+    param([string]$ModuleId, [string]$Source, [bool]$Overwrite)
+    if ($ModuleId -notmatch $script:IdPattern) { throw (New-TtxBadRequest 'Module id must use letters, digits, - and _.') }
+    if (Test-TtxBuiltInModule $ModuleId) { throw (New-TtxConflict "'$ModuleId' is a built-in module; choose another id.") }
+    $problems = Test-TtxModuleSource -Source $Source
+    if ($problems.Count -gt 0) { throw (New-TtxBadRequest ('Module not imported: ' + ($problems -join ' '))) }
+    $dir = Join-Path $script:Ttx.CustomModulesDir $ModuleId
+    $path = Join-Path $dir 'module.ps1'
+    $previous = $null
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $previous = Read-TtxTextFile -Path $path
+        if ($previous -ne $Source -and -not $Overwrite) { throw (New-TtxConflict "A module '$ModuleId' already exists. Import with overwrite to replace it.") }
+    }
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    # With a BOM, so Windows PowerShell 5.1 reads non-ASCII text correctly.
+    [System.IO.File]::WriteAllText($path, $Source, (New-Object System.Text.UTF8Encoding $true))
+    $info = Get-TtxModuleMeta -ModuleId $ModuleId
+    if (-not $info.ok) {
+        if ($null -ne $previous) { [System.IO.File]::WriteAllText($path, $previous, (New-Object System.Text.UTF8Encoding $true)) }
+        else { Remove-Item -LiteralPath $dir -Recurse -Force }
+        throw (New-TtxBadRequest "Module not imported: describing it failed: $($info.error)")
+    }
+    return $info
+}
+
+function Remove-TtxCustomModule {
+    param([string]$ModuleId)
+    if ($ModuleId -notmatch $script:IdPattern) { throw (New-TtxBadRequest 'Invalid module id.') }
+    if (Test-TtxBuiltInModule $ModuleId) { throw (New-TtxConflict "'$ModuleId' is a built-in module and can't be removed.") }
+    $dir = Join-Path $script:Ttx.CustomModulesDir $ModuleId
+    if (-not (Test-Path -LiteralPath $dir)) { throw (New-TtxNotFound "Module '$ModuleId' not found.") }
+    Remove-Item -LiteralPath $dir -Recurse -Force
+    return @{ removed = $ModuleId }
+}
+
+# A scenario plus the source of the custom modules it uses, so it can be
+# imported on another host (D24). ART steps travel as GUIDs only.
+function Export-TtxScenarioBundle {
+    param([string]$Id)
+    $entry = Get-TtxScenario -Id $Id
+    if ($entry.scenario -isnot [hashtable]) { throw (New-TtxBadRequest "Scenario '$Id' can't be read.") }
+    $modules = @()
+    $atomics = @()
+    foreach ($st in @($entry.scenario.steps | Where-Object { $_ -is [hashtable] })) {
+        if ($st.module) {
+            $mid = [string]$st.module
+            if (-not (Test-TtxBuiltInModule $mid) -and @($modules | Where-Object { $_.id -eq $mid }).Count -eq 0) {
+                $modules += , @{ id = $mid; source = (Get-TtxModuleSource -ModuleId $mid).source }
+            }
+        }
+        elseif ($st.atomic_guid) {
+            $t = Get-TtxCatalogTest -Guid ([string]$st.atomic_guid)
+            $atomics += , @{ guid = [string]$st.atomic_guid; techniqueId = $(if ($t) { $t.techniqueId } else { [string]$st.technique }); testName = $(if ($t) { $t.testName } else { '' }) }
+        }
+    }
+    return @{
+        ttxExport     = 1
+        exportedAtUtc = (Get-TtxUtcNow)
+        exportedFrom  = [Environment]::MachineName
+        artVersion    = $(if ($script:Ttx.Catalog.meta) { $script:Ttx.Catalog.meta.artVersion } else { $null })
+        scenario      = $entry.scenario
+        modules       = $modules
+        atomics       = $atomics
+    }
+}
+
+# Imports an export bundle (or a plain scenario file). Module code in a
+# bundle is only installed when the facilitator confirmed it (ImportModules).
+function Import-TtxScenarioBundle {
+    param($Bundle, [bool]$Overwrite, [bool]$ImportModules)
+    if ($Bundle -isnot [hashtable]) { throw (New-TtxBadRequest 'The file must contain a JSON object.') }
+    $scenario = $Bundle
+    $modules = @()
+    if ($Bundle.ContainsKey('ttxExport')) {
+        $scenario = $Bundle.scenario
+        $modules = @($Bundle.modules | Where-Object { $_ -is [hashtable] })
+    }
+    if ($scenario -isnot [hashtable] -or -not $scenario.steps) { throw (New-TtxBadRequest 'No scenario found in the file.') }
+    $imported = @()
+    if ($modules.Count -gt 0) {
+        if (-not $ImportModules) {
+            throw (New-TtxBadRequest ("This file contains $($modules.Count) custom module(s) ($((@($modules | ForEach-Object { $_.id })) -join ', ')). Review their code and confirm to import them."))
+        }
+        foreach ($m in $modules) {
+            Import-TtxModule -ModuleId ([string]$m.id) -Source ([string]$m.source) -Overwrite $Overwrite | Out-Null
+            $imported += [string]$m.id
+        }
+    }
+    $saved = Save-TtxScenario -Scenario $scenario -Overwrite $Overwrite
+    $saved.importedModules = $imported
+    return $saved
 }
 
 function Get-TtxScenarioPath {
@@ -325,7 +511,7 @@ function Test-TtxHasModuleSteps {
 }
 
 # Returns the scenario's parameter list. ArtifactFolder is added for
-# scenarios with stub module steps (the only steps that write to it).
+# scenarios with module steps (the only steps that write to it).
 # Each parameter: name, default, description, type (string|choice|bool), choices.
 function Get-TtxScenarioParameters {
     param([hashtable]$Scenario)
@@ -712,25 +898,7 @@ function Get-TtxArtContext {
 # Runs the step runner's 'describe' operation synchronously in a fresh runspace.
 function Invoke-TtxDescribe {
     param([hashtable]$Step)
-    $ps = [System.Management.Automation.PowerShell]::Create()
-    try {
-        $contextJson = ConvertTo-TtxJson -InputObject (Get-TtxStepContext -Step $Step) -Compress
-        [void]$ps.AddCommand($script:Ttx.RunnerPath)
-        [void]$ps.AddParameter('ModulePath', (Get-TtxModulePath $Step.module))
-        [void]$ps.AddParameter('Operation', 'describe')
-        [void]$ps.AddParameter('ContextJson', $contextJson)
-        $out = @($ps.Invoke())
-        $json = $out | Where-Object { $_ -is [string] } | Select-Object -Last 1
-        if (-not $json) {
-            $msg = ($ps.Streams.Error | ForEach-Object { $_.ToString() }) -join '; '
-            if (-not $msg) { $msg = 'Step runner produced no result.' }
-            return @{ ok = $false; error = $msg }
-        }
-        return ConvertFrom-TtxJson -Json $json
-    }
-    finally {
-        $ps.Dispose()
-    }
+    return (Invoke-TtxDescribeModule -ModulePath (Get-TtxModulePath $Step.module) -Context (Get-TtxStepContext -Step $Step))
 }
 
 # Steps this step depends on that aren't done yet. Normally a dependency must
@@ -754,6 +922,9 @@ function Get-TtxStepBlocker {
     param([hashtable]$Step)
     if ($Step.kind -eq 'module') {
         if ($Step.describeError) { return "Module '$($Step.module)' could not be loaded: $($Step.describeError)" }
+        if ($Step.info -and $Step.info.requiresElevation -and -not $script:Ttx.Session.preflight.elevated) {
+            return "Module '$($Step.module)' declares RequiresElevation and the control center is not running as administrator."
+        }
         return $null
     }
     if (-not $Step.atomic) {
@@ -1153,6 +1324,8 @@ function Initialize-TtxEngine {
     $script:Ttx.RunsDir = Join-Path $Root 'runs'
     $script:Ttx.ScenariosDir = Join-Path $Root 'scenarios'
     $script:Ttx.ModulesDir = Join-Path $Root 'modules'
+    $script:Ttx.CustomModulesDir = Join-Path $Root 'custom-modules'
+    $script:Ttx.ModuleInfoCache = @{}
     $script:Ttx.RunnerPath = Join-Path (Join-Path $Root 'server') 'StepRunner.ps1'
     $script:Ttx.ArtRunnerPath = Join-Path (Join-Path $Root 'server') 'ArtRunner.ps1'
     $script:Ttx.CatalogBuilderPath = Join-Path (Join-Path $Root 'server') 'CatalogBuilder.ps1'
@@ -1927,7 +2100,8 @@ function Write-TtxAnswerKey {
         [void]$sb.AppendLine('|---|---|')
         if ($step.tactic) { [void]$sb.AppendLine("| Tactic | $(Get-TtxMdCell $step.tactic) |") }
         if ($step.kind -eq 'module') {
-            [void]$sb.AppendLine("| Step type | stub module ``$($step.module)`` (test only) |")
+            $kindText = if ($step.info -and $step.info.isStub) { 'stub module (test only)' } else { 'custom module' }
+            [void]$sb.AppendLine("| Step type | $kindText ``$($step.module)`` |")
             if ($step.info -and $step.info.technique) { [void]$sb.AppendLine("| Technique | $($step.info.technique) |") }
         }
         elseif ($a) {
@@ -1982,7 +2156,7 @@ function Write-TtxAnswerKey {
             }
         }
         if (@($step.artifacts).Count -gt 0) {
-            [void]$sb.AppendLine('Artifacts reported by the stub module:')
+            [void]$sb.AppendLine('Artifacts reported by the module:')
             foreach ($art in @($step.artifacts)) { [void]$sb.AppendLine("- **$($art.type)** ``$($art.location)``$(if ($art.detail) { " - $($art.detail)" })") }
             [void]$sb.AppendLine()
         }
@@ -2105,4 +2279,6 @@ Export-ModuleMember -Function Initialize-TtxEngine, Get-TtxScenarioList, Get-Ttx
     Set-TtxDetectionResult, Get-TtxAnswerKey,
     Get-TtxCatalogStatus, Get-TtxCatalogJson, Get-TtxCatalogTest, Get-TtxAtomicPreview, Start-TtxCatalogBuild,
     Test-TtxCatalogBuilding, Get-TtxHostPreflight, Set-TtxSessionOptions, Stop-TtxRunningStep,
+    Get-TtxModuleList, Get-TtxModuleSource, Import-TtxModule, Remove-TtxCustomModule, Test-TtxModuleSource,
+    Export-TtxScenarioBundle, Import-TtxScenarioBundle,
     ConvertFrom-TtxJson, ConvertTo-TtxJson

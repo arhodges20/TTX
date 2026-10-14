@@ -14,6 +14,12 @@ are refused (D10).
 | `POST /api/catalog/rescan` | Rebuild the catalog. |
 | `GET /api/scenarios`, `GET /api/scenarios/<id>` | List / read scenarios with validation results. |
 | `POST /api/scenarios` | `{ scenario, overwrite }` → save `scenarios/<id>.json`. |
+| `GET /api/scenarios/<id>/export` | Download the `.ttx.json` bundle. |
+| `POST /api/scenarios/import` | `{ bundle, overwrite, importModules }` → import a bundle or plain scenario. |
+| `GET /api/modules`, `GET /api/modules/<id>` | List modules (with metadata) / one module's code. |
+| `POST /api/modules` | `{ id, source, overwrite }` → import a custom module. |
+| `POST /api/modules/<id>/remove` | Remove a custom module. |
+| `GET /api/modules-template` | The custom module template. |
 | `POST /api/sessions` | `{ scenarioId, parameters }` → load a scenario. |
 | `GET /api/session?since=<n>&rev=<r>` | Session (only if changed since `rev`) and new events. |
 | `POST /api/session/steps/<id>/run` | Run one step. |

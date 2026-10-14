@@ -10,6 +10,7 @@ $script:UiFiles = @{
     '/app.js'     = @{ File = 'app.js'; Type = 'application/javascript' }
     '/style.css'  = @{ File = 'style.css'; Type = 'text/css' }
     '/builder.js' = @{ File = 'builder.js'; Type = 'application/javascript' }
+    '/modules.js' = @{ File = 'modules.js'; Type = 'application/javascript' }
 }
 
 function Send-TtxResponse {
@@ -78,6 +79,26 @@ function Invoke-TtxRequest {
             Send-TtxJson $res @{ scenarios = (Get-TtxScenarioList) }
             return
         }
+        if ($method -eq 'GET' -and $path -match '^/api/scenarios/([A-Za-z0-9_-]+)/export$') {
+            $id = $Matches[1]
+            $res.Headers['Content-Disposition'] = "attachment; filename=""$id.ttx.json"""
+            Send-TtxResponse -Response $res -Body (ConvertTo-TtxJson -InputObject (Export-TtxScenarioBundle -Id $id))
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/modules-template') {
+            $tpl = Join-Path (Join-Path (Split-Path -Parent $UiRoot) 'docs') 'custom-module-template.ps1'
+            $res.Headers['Content-Disposition'] = 'attachment; filename="custom-module-template.ps1"'
+            Send-TtxResponse -Response $res -ContentType 'text/plain' -Body ([System.IO.File]::ReadAllText($tpl, [System.Text.Encoding]::UTF8))
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/modules') {
+            Send-TtxJson $res @{ modules = (Get-TtxModuleList) }
+            return
+        }
+        if ($method -eq 'GET' -and $path -match '^/api/modules/([A-Za-z0-9_-]+)$') {
+            Send-TtxJson $res (Get-TtxModuleSource -ModuleId $Matches[1])
+            return
+        }
         if ($method -eq 'GET' -and $path -match '^/api/scenarios/([A-Za-z0-9_-]+)$') {
             Send-TtxJson $res (Get-TtxScenario -Id $Matches[1])
             return
@@ -122,6 +143,18 @@ function Invoke-TtxRequest {
                 $params = @{}
                 if ($body.parameters -is [hashtable]) { $params = $body.parameters }
                 Send-TtxJson $res (New-TtxSession -ScenarioId ([string]$body.scenarioId) -Parameters $params)
+                return
+            }
+            if ($path -eq '/api/scenarios/import') {
+                Send-TtxJson $res (Import-TtxScenarioBundle -Bundle $body.bundle -Overwrite ([bool]$body.overwrite) -ImportModules ($body.importModules -eq $true))
+                return
+            }
+            if ($path -eq '/api/modules') {
+                Send-TtxJson $res (Import-TtxModule -ModuleId ([string]$body.id) -Source ([string]$body.source) -Overwrite ([bool]$body.overwrite))
+                return
+            }
+            if ($path -match '^/api/modules/([A-Za-z0-9_-]+)/remove$') {
+                Send-TtxJson $res (Remove-TtxCustomModule -ModuleId $Matches[1])
                 return
             }
             if ($path -eq '/api/scenarios') {

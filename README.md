@@ -7,7 +7,8 @@ Elastic); the facilitator uses this tool to run steps, see exactly what ran,
 record which detections fired, and clean up.
 
 This repo is **orchestration only** (D19): no atomics or attack code. A step
-references an ART test by GUID plus input arguments.
+references an ART test by GUID plus input arguments, or a module you import
+yourself (D24).
 
 Tested on a Windows Server lab host with Windows PowerShell 5.1 and
 Invoke-AtomicRedTeam 2.1.0.
@@ -41,7 +42,8 @@ Opens <http://localhost:8080/>; Ctrl+C stops it. Options: `-ArtRoot`,
 
 The first start builds the ART catalog in the background (a minute or two);
 it's cached in `runs\catalog.json`. When upgrading to a new copy, copy
-`runs\` (sessions and catalog) and any scenarios you made in `scenarios\`.
+`runs\`, `custom-modules\` and any scenarios you made in `scenarios\` (or
+export your scenarios and import them in the new copy).
 
 ## Using it
 
@@ -53,6 +55,15 @@ it's cached in `runs\catalog.json`. When upgrading to a new copy, copy
 - **Scenario builder**: pick tests, order them, set dependencies, input
   overrides, verify checks, expected detections and hunt notes; saves
   `scenarios\<id>.json`. Format: [docs/scenario-format.md](docs/scenario-format.md).
+- **Modules**: import your own step types (one `.ps1` with five functions;
+  start from **Download template**). Saved in `custom-modules\` and run as
+  the control-center user with no sandbox, so only import code you've
+  reviewed. Add them to scenarios with **Add module step**. Contract:
+  [docs/module-contract.md](docs/module-contract.md).
+- **Export / Import** (builder, and Export in the scenario list): a
+  `.ttx.json` bundle with the scenario and the code of any custom modules it
+  uses, to move scenarios between hosts. Importing module code asks you to
+  review it first. Plain scenario `.json` files import too.
 - **Exercise**: load a scenario, **Run step** or **Run all**. Each step checks
   prereqs, runs the test, records the command, UTC window, exit code and
   output, then runs verify checks.
@@ -131,7 +142,8 @@ Start-ControlCenter.ps1   entry point
 server/                   engine, HTTP API, ART runner, catalog builder, verify, preflight
 ui/                       web UI (plain HTML/CSS/JS)
 scenarios/                scenarios (<id>.json)
-modules/                  stub modules for engine tests only
+modules/                  built-in stub modules (engine tests)
+custom-modules/           modules you import (gitignored)
 tests/                    syntax check, smoke test, mock ART fixtures
 runs/                     sessions, logs, catalog cache (gitignored)
 docs/                     brief, decisions, scenario format, API, stub contract

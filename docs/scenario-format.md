@@ -69,7 +69,14 @@ cleanup (`process_ran_since_step_start` excepted).
 - **Warnings** (GUID not installed, technique mismatch, unknown input
   argument): shown only.
 
-## Stub step (tests only)
+## Module step
 
-`{ "id", "title", "module": "stub-...", "params": {}, "depends_on": [] }`;
-see [module-contract.md](module-contract.md).
+`{ "id", "title", "tactic", "module": "<module id>", "params": {}, "depends_on": [], "expected_detections": [], "hunt_notes": [] }`.
+The module is built in (`modules/`) or imported (`custom-modules/`); its own
+Verify and Cleanup are used. See [module-contract.md](module-contract.md).
+
+## Export bundle (`.ttx.json`)
+
+`{ "ttxExport": 1, "exportedAtUtc", "exportedFrom", "artVersion", "scenario": {...}, "modules": [ { "id", "source" } ], "atomics": [ { "guid", "techniqueId", "testName" } ] }`.
+`modules` holds the code of custom modules the scenario uses; `atomics` is for
+reference (ART tests travel as GUIDs). A plain scenario file also imports.

@@ -17,6 +17,7 @@
       <button class="tab" data-view="exercise" role="tab">Exercise</button>
       <button class="tab" data-view="catalog" role="tab">ART catalog</button>
       <button class="tab" data-view="builder" role="tab">Scenario builder</button>
+      <button class="tab" data-view="modules" role="tab">Modules</button>
     </nav>
     <div class="topbar-right">
       <label class="theme-pick">Theme
@@ -51,6 +52,7 @@
             <div id="sd-params"></div>
             <button type="submit" id="sd-load" class="btn btn-primary">Load scenario</button>
             <button type="button" id="sd-edit" class="btn">Edit in builder</button>
+            <a id="sd-export" class="btn" href="#">Export</a>
           </form>
         </div>
       </section>
@@ -126,6 +128,33 @@
     </section>
   </main>
 
+  <!-- Custom modules -->
+  <main class="view" id="view-modules" hidden>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Modules</h2>
+        <a class="btn btn-small" href="/api/modules-template" download="custom-module-template.ps1">Download template</a>
+      </div>
+      <p class="meta">
+        Your own step types, alongside ART tests. A module is one PowerShell file with five functions
+        (<code>Get-TtxModuleInfo</code>, <code>Invoke-TtxRun</code>, <code>Test-TtxVerify</code>, <code>Invoke-TtxCleanup</code>,
+        <code>Get-TtxHunt</code>); see the template. Imported modules are saved in <code>custom-modules\</code> and run as the
+        control-center user, with no sandbox. Only import code you have reviewed.
+      </p>
+      <div class="builder-meta">
+        <label>Module id <input id="m-id" placeholder="my-module"></label>
+        <label>File <input type="file" id="m-file" accept=".ps1,.txt"></label>
+        <label class="wide">Code <textarea id="m-source" rows="10" spellcheck="false" placeholder="Paste module code or choose a .ps1 file"></textarea></label>
+      </div>
+      <div class="actions">
+        <label class="check"><input type="checkbox" id="m-overwrite"> Replace if it exists</label>
+        <button id="m-import" class="btn btn-primary">Import module</button>
+      </div>
+      <div id="m-result"></div>
+      <ol id="m-list" class="steps"></ol>
+    </section>
+  </main>
+
   <!-- Scenario builder -->
   <main class="view" id="view-builder" hidden>
     <section class="panel">
@@ -134,6 +163,9 @@
         <div class="actions">
           <select id="b-open" aria-label="Open scenario"></select>
           <button id="b-new" class="btn btn-small">New scenario</button>
+          <button id="b-import" class="btn btn-small" title="Import a .ttx.json bundle or a scenario .json">Import</button>
+          <button id="b-export" class="btn btn-small" title="Download this scenario (with its custom modules) as .ttx.json">Export</button>
+          <input type="file" id="b-import-file" accept=".json,application/json" hidden>
         </div>
       </div>
       <p class="meta">
@@ -152,6 +184,7 @@
       <ol id="b-steps" class="steps"></ol>
       <div class="actions">
         <button id="b-add" class="btn">Add step from catalog</button>
+        <button id="b-add-module" class="btn">Add module step</button>
         <button id="b-save" class="btn btn-primary">Save scenario</button>
       </div>
       <div id="b-result"></div>
@@ -160,5 +193,6 @@
 
   <script src="/app.js"></script>
   <script src="/builder.js"></script>
+  <script src="/modules.js"></script>
 </body>
 </html>
