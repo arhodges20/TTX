@@ -16,7 +16,7 @@ Invoke-AtomicRedTeam 2.1.0.
 
 | Exercise | ART catalog | Scenario builder |
 |---|---|---|
-| [![Exercise view: preflight with Elastic Agent, Elastic Defend and Sysmon; a loaded discovery scenario](docs/images/exercise.png)](docs/images/exercise.png) | [![ART catalog: search, flags, and test detail](docs/images/catalog.png)](docs/images/catalog.png) | [![Scenario builder: a step with its ART test and input overrides](docs/images/builder.png)](docs/images/builder.png) |
+| [![Exercise view: preflight with Elastic Agent, Elastic Defend and Sysmon; a loaded discovery scenario](docs/images/exercise.png)](docs/images/exercise.png) | [![ART catalog: search, flags, and test detail](docs/images/catalog.png)](docs/images/catalog.png) | [![Scenario builder: the built-in Persistence via Run key scenario with its first ART step](docs/images/builder.png)](docs/images/builder.png) |
 
 Taken on the lab host (Windows Server, Elastic Agent 9.5.5, ART 2.1.0).
 
