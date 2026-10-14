@@ -295,12 +295,40 @@ const Builder = {
     return true;
   },
 
+  // A step may only depend on steps above it. After a reorder, drop
+  // dependencies that now point down (or at steps that no longer exist) and
+  // say which were dropped.
+  pruneDependencies() {
+    const dropped = [];
+    const above = new Set();
+    for (const st of this.draft.steps) {
+      const keep = asArray(st.depends_on).filter(d => above.has(d));
+      for (const d of asArray(st.depends_on)) if (!keep.includes(d)) dropped.push(`${st.title || st.id} no longer depends on ${d}`);
+      st.depends_on = keep;
+      above.add(st.id);
+    }
+    return dropped;
+  },
+
   move(i, delta) {
     const s = this.draft.steps;
     const j = i + delta;
     if (j < 0 || j >= s.length) return;
     [s[i], s[j]] = [s[j], s[i]];
+    const dropped = this.pruneDependencies();
     this.render();
+    fill($('b-result'), dropped.length
+      ? el('div', { class: 'problems warn' }, 'Step order changed: ' + dropped.join('; ') + '. Re-tick "Depends on" if needed.')
+      : null);
+  },
+
+  // Renaming a step id keeps other steps' dependencies pointing at it.
+  renameStep(st, newId) {
+    const oldId = st.id;
+    st.id = newId;
+    for (const o of this.draft.steps) {
+      if (o !== st) o.depends_on = asArray(o.depends_on).map(d => (d === oldId ? newId : d));
+    }
   },
 
   remove(i) {
@@ -350,7 +378,7 @@ const Builder = {
         el('button', { class: 'btn btn-small', disabled: i === steps.length - 1, onclick: () => this.move(i, 1), title: 'Move down' }, '↓'),
         el('button', { class: 'btn btn-small btn-danger', onclick: () => this.remove(i) }, 'Remove')),
       el('div', { class: 'b-grid' },
-        el('label', null, 'Step id', this.bind(el('input', { value: st.id }), st, 'id')),
+        el('label', null, 'Step id', el('input', { value: st.id, oninput: (e) => this.renameStep(st, e.target.value) })),
         el('label', null, 'Title', this.bind(el('input', { value: st.title }), st, 'title')),
         el('label', null, 'Tactic', this.bind(el('input', { value: st.tactic || '', list: 'tactics' }), st, 'tactic')),
         el('label', null, 'Technique', el('input', { value: st.technique || '', readonly: !!st.atomic_guid, title: 'Set from the chosen test' })),
@@ -449,6 +477,7 @@ const Builder = {
 
   async save() {
     const d = this.draft;
+    this.pruneDependencies();
     d.id = String(d.id || '').trim();
     const exists = ui.scenarios.some(s => s.id === d.id);
     let overwrite = false;
